@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Project {
+  id         String     @id @default(uuid())
+  name       String
+  siteName   String?
+  address    String?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  scenarios  Scenario[]
+}
+
+model Scenario {
+  id         String          @id @default(uuid())
+  projectId  String
+  name       String
+  mode       String?
+  siteJson   Json
+  inputJson  Json
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  result     ScenarioResult?
+  reports    ReportFile[]
+}
+
+model ScenarioResult {
+  id              String    @id @default(uuid())
+  scenarioId      String    @unique
+  summaryJson     Json
+  cashflowJson    Json
+  sensitivityJson Json?
+  comparisonJson  Json?
+  warningsJson    Json?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  scenario        Scenario  @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+}
+
+model ReportFile {
+  id          String    @id @default(uuid())
+  scenarioId  String
+  fileUrl     String
+  fileName    String
+  createdAt   DateTime  @default(now())
+
+  scenario    Scenario  @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+}
