@@ -22,6 +22,10 @@ function normalizeFeatures(payload: any) {
   return [];
 }
 
+function compactText(text: string) {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export async function GET(req: NextRequest) {
   const lon = Number(req.nextUrl.searchParams.get("lon"));
   const lat = Number(req.nextUrl.searchParams.get("lat"));
@@ -74,11 +78,21 @@ export async function GET(req: NextRequest) {
 
     const text = await response.text();
     if (!response.ok) {
+      const contentType = response.headers.get("content-type") ?? "unknown-content-type";
+      const server = response.headers.get("server") ?? "unknown-server";
+      const body = compactText(text).slice(0, 180) || "응답 본문 없음";
+
       return NextResponse.json(
         {
           ok: false,
-          message: `VWorld 지적 WMS 클릭조회 실패 (HTTP ${response.status})`,
-          detail: text.slice(0, 300),
+          code: "VWORLD_UPSTREAM_ERROR",
+          message: `VWorld 지적 WMS 클릭조회 실패 (HTTP ${response.status}) · ${contentType} · server=${server} · ${body}`,
+          detail: {
+            status: response.status,
+            contentType,
+            server,
+            body,
+          },
         },
         { status: 502 }
       );
@@ -88,11 +102,13 @@ export async function GET(req: NextRequest) {
     try {
       payload = parseJsonOrJsonp(text);
     } catch (error) {
+      const detail = error instanceof Error ? error.message : compactText(text).slice(0, 180);
       return NextResponse.json(
         {
           ok: false,
-          message: "VWorld 지적 WMS 응답 형식을 해석하지 못했습니다.",
-          detail: error instanceof Error ? error.message : text.slice(0, 180),
+          code: "VWORLD_RESPONSE_PARSE_ERROR",
+          message: `VWorld 지적 WMS 응답 형식을 해석하지 못했습니다. · ${detail}`,
+          detail,
         },
         { status: 502 }
       );
@@ -120,11 +136,13 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
       {
         ok: false,
-        message: "VWorld 지적 WMS 클릭조회 중 오류가 발생했습니다.",
-        detail: error instanceof Error ? error.message : String(error),
+        code: "VWORLD_FETCH_ERROR",
+        message: `VWorld 지적 WMS 클릭조회 중 네트워크 오류가 발생했습니다. · ${detail}`,
+        detail,
       },
       { status: 502 }
     );
