@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const VWORLD_WFS_URL = "https://api.vworld.kr/req/wfs";
+const VWORLD_ADDRESS_URL = "https://api.vworld.kr/req/address";
 const CADASTRAL_LAYER = "lt_c_landinfobasemap";
 
 function parseJsonOrJsonp(text: string) {
@@ -37,10 +38,51 @@ function extractServiceException(text: string) {
   return { code, message };
 }
 
+async function probeAddressKey(key: string) {
+  const params = new URLSearchParams({
+    service: "address",
+    request: "getcoord",
+    version: "2.0",
+    crs: "EPSG:4326",
+    address: "서울특별시 중구 세종대로 110",
+    refine: "true",
+    simple: "false",
+    format: "json",
+    type: "ROAD",
+    key,
+  });
+
+  try {
+    const response = await fetch(`${VWORLD_ADDRESS_URL}?${params.toString()}`, {
+      cache: "no-store",
+    });
+    const text = await response.text();
+    const compact = compactText(text);
+
+    if (/INVALID_KEY|등록되지 않은 인증키/i.test(compact)) return "INVALID_KEY";
+
+    try {
+      const payload = JSON.parse(text);
+      const status = payload?.response?.status;
+      const errorCode = payload?.response?.error?.level || payload?.response?.error?.code;
+      if (status === "OK") return "OK";
+      if (errorCode) return `ERROR:${String(errorCode).slice(0, 40)}`;
+      if (status) return `STATUS:${String(status).slice(0, 40)}`;
+    } catch {
+      // Fall through to the sanitized HTTP classification below.
+    }
+
+    return `HTTP_${response.status}`;
+  } catch {
+    return "FETCH_ERROR";
+  }
+}
+
 export async function GET(req: NextRequest) {
   const lon = Number(req.nextUrl.searchParams.get("lon"));
   const lat = Number(req.nextUrl.searchParams.get("lat"));
-  const key = process.env.VWORLD_API_KEY?.trim();
+  const rawKey = process.env.VWORLD_API_KEY ?? "";
+  const key = rawKey.trim();
   const domain = process.env.VWORLD_API_DOMAIN?.trim();
 
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
@@ -82,14 +124,26 @@ export async function GET(req: NextRequest) {
     if (isXmlException) {
       const serviceError = extractServiceException(text);
       const suffix = serviceError.message ? ` · ${serviceError.message}` : "";
+      const diagnostics = {
+        keyLength: key.length,
+        trimmedCharacters: rawKey.length - key.length,
+        uuidLike: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(key),
+        domain: domain ?? "NOT_SET",
+        addressProbe: serviceError.code === "INVALID_KEY" ? await probeAddressKey(key) : "SKIPPED",
+      };
+      const diagnosticSuffix = serviceError.code === "INVALID_KEY"
+        ? ` · keyLength=${diagnostics.keyLength} · uuidLike=${diagnostics.uuidLike} · trimmed=${diagnostics.trimmedCharacters} · domain=${diagnostics.domain} · addressProbe=${diagnostics.addressProbe}`
+        : "";
+
       return NextResponse.json(
         {
           ok: false,
           code: `VWORLD_SERVICE_EXCEPTION_${serviceError.code}`,
-          message: `VWorld WFS ServiceException [${serviceError.code}]${suffix}`,
+          message: `VWorld WFS ServiceException [${serviceError.code}]${suffix}${diagnosticSuffix}`,
           detail: {
             serviceExceptionCode: serviceError.code,
             serviceExceptionMessage: serviceError.message,
+            diagnostics,
           },
         },
         { status: 502 }
