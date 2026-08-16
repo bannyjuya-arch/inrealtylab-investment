@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const VWORLD_WFS_URL = "https://api.vworld.kr/req/wfs";
+const VWORLD_WMS_URL = "https://api.vworld.kr/req/wms";
+const CADASTRAL_LAYER = "lt_c_landinfobasemap";
 
 function parseJsonOrJsonp(text: string) {
   const trimmed = text.trim();
@@ -9,17 +10,23 @@ function parseJsonOrJsonp(text: string) {
   try {
     return JSON.parse(trimmed);
   } catch {
-    // ES2017 target compatibility: avoid the RegExp dotAll (s) flag.
     const match = trimmed.match(/^[^(]+\(([\s\S]*)\)\s*;?$/);
-    if (!match) throw new Error(`응답 파싱 실패: ${trimmed.slice(0, 120)}`);
+    if (!match) throw new Error(`응답 파싱 실패: ${trimmed.slice(0, 180)}`);
     return JSON.parse(match[1]);
   }
+}
+
+function normalizeFeatures(payload: any) {
+  if (Array.isArray(payload?.features)) return payload.features;
+  if (Array.isArray(payload?.featureCollection?.features)) return payload.featureCollection.features;
+  return [];
 }
 
 export async function GET(req: NextRequest) {
   const lon = Number(req.nextUrl.searchParams.get("lon"));
   const lat = Number(req.nextUrl.searchParams.get("lat"));
   const key = process.env.VWORLD_API_KEY;
+  const domain = process.env.VWORLD_API_DOMAIN ?? req.nextUrl.origin;
 
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
     return NextResponse.json({ ok: false, message: "유효한 좌표가 필요합니다." }, { status: 400 });
@@ -32,27 +39,37 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // VWorld official sample pattern: query the cadastral base-map WFS layer
-  // using a very small BBOX around the clicked longitude/latitude.
-  const delta = 0.000015;
+  // WFS requests from Vercel are returning upstream 502 responses.
+  // Use the queryable cadastral WMS layer instead and ask for GeoJSON feature info
+  // around the clicked point. WMS 1.1.1 keeps EPSG:4326 BBOX axis order lon,lat.
+  const delta = 0.00035;
   const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join(",");
 
   const params = new URLSearchParams({
     key,
-    SERVICE: "WFS",
-    version: "1.1.0",
-    request: "GetFeature",
-    TYPENAME: "lt_c_landinfobasemap",
-    OUTPUT: "text/javascript",
-    SRSNAME: "EPSG:4326",
+    domain,
+    SERVICE: "WMS",
+    VERSION: "1.1.1",
+    REQUEST: "GetFeatureInfo",
+    LAYERS: CADASTRAL_LAYER,
+    QUERY_LAYERS: CADASTRAL_LAYER,
+    STYLES: CADASTRAL_LAYER,
+    SRS: "EPSG:4326",
     BBOX: bbox,
-    callback: "parseResponse",
+    WIDTH: "101",
+    HEIGHT: "101",
+    X: "50",
+    Y: "50",
+    FORMAT: "image/png",
+    INFO_FORMAT: "application/json",
+    FEATURE_COUNT: "5",
+    TRANSPARENT: "true",
   });
 
   try {
-    const response = await fetch(`${VWORLD_WFS_URL}?${params.toString()}`, {
+    const response = await fetch(`${VWORLD_WMS_URL}?${params.toString()}`, {
       cache: "no-store",
-      headers: { Accept: "application/javascript, application/json, text/plain, */*" },
+      headers: { Accept: "application/json, text/javascript, text/plain, */*" },
     });
 
     const text = await response.text();
@@ -60,22 +77,34 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
-          message: `VWorld 지적 WFS 호출 실패 (HTTP ${response.status})`,
+          message: `VWorld 지적 WMS 클릭조회 실패 (HTTP ${response.status})`,
           detail: text.slice(0, 300),
         },
         { status: 502 }
       );
     }
 
-    const payload = parseJsonOrJsonp(text);
-    const features = Array.isArray(payload?.features) ? payload.features : [];
+    let payload: any;
+    try {
+      payload = parseJsonOrJsonp(text);
+    } catch (error) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: "VWorld 지적 WMS 응답 형식을 해석하지 못했습니다.",
+          detail: error instanceof Error ? error.message : text.slice(0, 180),
+        },
+        { status: 502 }
+      );
+    }
 
+    const features = normalizeFeatures(payload);
     if (!features.length) {
       return NextResponse.json(
         {
           ok: false,
           message: "해당 위치에서 지적 필지를 찾지 못했습니다.",
-          source: "vworld-wfs-lt_c_landinfobasemap",
+          source: "vworld-wms-getfeatureinfo",
         },
         { status: 404 }
       );
@@ -83,7 +112,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      source: "vworld-wfs-lt_c_landinfobasemap",
+      source: "vworld-wms-getfeatureinfo",
+      dataProjection: "EPSG:4326",
       featureCollection: {
         type: "FeatureCollection",
         features,
@@ -93,7 +123,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        message: "VWorld 지적 WFS 조회 중 오류가 발생했습니다.",
+        message: "VWorld 지적 WMS 클릭조회 중 오류가 발생했습니다.",
         detail: error instanceof Error ? error.message : String(error),
       },
       { status: 502 }
