@@ -6,11 +6,6 @@ const SOURCE_DATA_DATE = "2023-12-21";
 
 type SeoulAssetRow = Record<string, unknown>;
 
-type KeyConfig = {
-  key: string;
-  source: "PUBLIC_DATA_API_KEY" | "MOLIT_LANDLAW_API_KEY" | "MOLIT_LANDUSE_API_KEY" | "NONE";
-};
-
 function asText(value: unknown) {
   return value === undefined || value === null ? "" : String(value).trim();
 }
@@ -23,27 +18,14 @@ function normalize(value: string) {
     .trim();
 }
 
-function decodeServiceKey(raw: string) {
+function serviceKey() {
+  const raw = process.env.PUBLIC_DATA_API_KEY ?? "";
   const trimmed = raw.trim();
   try {
     return decodeURIComponent(trimmed);
   } catch {
     return trimmed;
   }
-}
-
-function serviceKey(): KeyConfig {
-  const candidates: Array<[KeyConfig["source"], string | undefined]> = [
-    ["PUBLIC_DATA_API_KEY", process.env.PUBLIC_DATA_API_KEY],
-    ["MOLIT_LANDLAW_API_KEY", process.env.MOLIT_LANDLAW_API_KEY],
-    ["MOLIT_LANDUSE_API_KEY", process.env.MOLIT_LANDUSE_API_KEY],
-  ];
-
-  for (const [source, raw] of candidates) {
-    if (raw?.trim()) return { key: decodeServiceKey(raw), source };
-  }
-
-  return { key: "", source: "NONE" };
 }
 
 function safeText(raw: string, key: string) {
@@ -76,15 +58,13 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const keyConfig = serviceKey();
-  const key = keyConfig.key;
+  const key = serviceKey();
   if (!key) {
     return NextResponse.json(
       {
         ok: false,
         code: "NO_PUBLIC_DATA_KEY",
-        message: "공공데이터포털 서비스키가 없습니다. Vercel에 PUBLIC_DATA_API_KEY를 설정해 주세요.",
-        keySource: keyConfig.source,
+        message: "서울시 시유재산 조회용 PUBLIC_DATA_API_KEY가 Vercel에 설정되지 않았습니다.",
       },
       { status: 503 }
     );
@@ -104,12 +84,14 @@ export async function GET(request: NextRequest) {
     const raw = await response.text();
 
     if (!response.ok) {
+      const invalidKey = response.status === 401 || /등록되지 않은 인증키|인증키/i.test(raw);
       return NextResponse.json(
         {
           ok: false,
-          code: response.status === 401 ? "SEOUL_ASSET_INVALID_KEY" : "SEOUL_ASSET_UPSTREAM_ERROR",
-          message: `서울시 시유재산 조회 실패 (HTTP ${response.status}): ${safeText(raw, key)}`,
-          keySource: keyConfig.source,
+          code: invalidKey ? "SEOUL_ASSET_INVALID_PUBLIC_DATA_KEY" : "SEOUL_ASSET_UPSTREAM_ERROR",
+          message: invalidKey
+            ? "PUBLIC_DATA_API_KEY가 공공데이터포털에서 유효하지 않습니다. 공공데이터포털의 일반 인증키를 확인해 주세요."
+            : `서울시 시유재산 조회 실패 (HTTP ${response.status}): ${safeText(raw, key)}`,
         },
         { status: 502 }
       );
@@ -120,12 +102,7 @@ export async function GET(request: NextRequest) {
       payload = JSON.parse(raw);
     } catch {
       return NextResponse.json(
-        {
-          ok: false,
-          code: "SEOUL_ASSET_PARSE_ERROR",
-          message: `서울시 시유재산 응답 파싱 실패: ${safeText(raw, key)}`,
-          keySource: keyConfig.source,
-        },
+        { ok: false, code: "SEOUL_ASSET_PARSE_ERROR", message: `서울시 시유재산 응답 파싱 실패: ${safeText(raw, key)}` },
         { status: 502 }
       );
     }
@@ -156,12 +133,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     return NextResponse.json(
-      {
-        ok: false,
-        code: "SEOUL_ASSET_FETCH_ERROR",
-        message: error instanceof Error ? error.message : "서울시 시유재산 조회 중 오류가 발생했습니다.",
-        keySource: keyConfig.source,
-      },
+      { ok: false, code: "SEOUL_ASSET_FETCH_ERROR", message: error instanceof Error ? error.message : "서울시 시유재산 조회 중 오류가 발생했습니다." },
       { status: 502 }
     );
   }
