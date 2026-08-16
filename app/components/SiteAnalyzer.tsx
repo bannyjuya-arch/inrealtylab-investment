@@ -108,6 +108,10 @@ function formatPct(value: number) {
   return `${value.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
 }
 
+function formatArea(value: number) {
+  return `${Math.round(value).toLocaleString("ko-KR")}㎡`;
+}
+
 export default function SiteAnalyzer() {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
@@ -132,15 +136,51 @@ export default function SiteAnalyzer() {
   const capacityScenarios = useMemo(() => {
     const limit = regulation?.statutoryLimit;
     if (!limit || totalArea <= 0) return [];
+
     return [
-      { name: "보수", bcr: limit.bcrMax * 0.8, far: limit.farMax * 0.8, note: "법정상한의 80% 가정" },
-      { name: "기준", bcr: limit.bcrMax * 0.9, far: limit.farMax * 0.9, note: "법정상한의 90% 가정" },
-      { name: "법정최대", bcr: limit.bcrMax, far: limit.farMax, note: "시행령상 국가 법정상한" },
-    ].map((item) => ({
-      ...item,
-      footprint: Math.round(totalArea * (item.bcr / 100)),
-      grossFloorArea: Math.round(totalArea * (item.far / 100)),
-    }));
+      {
+        name: "보수 검토",
+        bcr: limit.bcrMax * 0.8,
+        far: limit.farMax * 0.8,
+        note: "법정상한의 80% 사업검토 가정",
+        status: "ASSUMPTION",
+      },
+      {
+        name: "기준 검토",
+        bcr: limit.bcrMax * 0.9,
+        far: limit.farMax * 0.9,
+        note: "법정상한의 90% 사업검토 가정",
+        status: "ASSUMPTION",
+      },
+      {
+        name: "법정 최대",
+        bcr: limit.bcrMax,
+        far: limit.farMax,
+        note: "현재 연결된 국가 법정상한",
+        status: "STATUTORY",
+      },
+    ].map((item) => {
+      const footprint = totalArea * (item.bcr / 100);
+      const grossFloorArea = totalArea * (item.far / 100);
+      const equivalentFloors = footprint > 0 ? grossFloorArea / footprint : 0;
+      return {
+        ...item,
+        footprint,
+        grossFloorArea,
+        equivalentFloors,
+        footprintPyeong: footprint / 3.305785,
+        grossFloorAreaPyeong: grossFloorArea / 3.305785,
+      };
+    });
+  }, [regulation, totalArea]);
+
+  const statutoryCapacity = useMemo(() => {
+    const limit = regulation?.statutoryLimit;
+    if (!limit || totalArea <= 0) return null;
+    return {
+      footprint: totalArea * (limit.bcrMax / 100),
+      grossFloorArea: totalArea * (limit.farMax / 100),
+    };
   }, [regulation, totalArea]);
 
   useEffect(() => {
@@ -375,7 +415,7 @@ export default function SiteAnalyzer() {
           <h1>대지를 선택하면 분석이 시작됩니다.</h1>
           <p>지도에서 실제 지적 필지를 지정하고 PNU와 대지면적을 확보하는 첫 단계입니다.</p>
         </div>
-        <div className="beta-chip">CORE v0.3</div>
+        <div className="beta-chip">CORE v0.4</div>
       </header>
 
       <form className="map-search" onSubmit={handleSearch}>
@@ -499,7 +539,7 @@ export default function SiteAnalyzer() {
                   <div className="next-step-card">
                     <span>NEXT</span>
                     <strong>개발가능 규모</strong>
-                    <p>확인된 대지면적과 법정 건폐율·용적률을 기준으로 보수·기준·법정최대 시나리오를 계산합니다.</p>
+                    <p>확인된 대지면적과 규제값을 기준으로 사업검토·법정최대 규모를 계산하고 규칙 반영 상태를 확인합니다.</p>
                     <button type="button" onClick={() => setActiveTab("CAPACITY")}>CAPACITY 보기</button>
                   </div>
                 </>
@@ -514,30 +554,82 @@ export default function SiteAnalyzer() {
                 {regulationLoading && <small>규제정보 조회 중...</small>}
               </div>
               {regulationError && <div className="analysis-alert error">{regulationError}</div>}
-              {regulation && regulation.statutoryLimit ? (
+              {regulation && regulation.statutoryLimit && statutoryCapacity ? (
                 <>
-                  <div className="analysis-summary">
-                    <span>적용 대지면적</span>
-                    <strong>{totalArea.toLocaleString("ko-KR")}㎡</strong>
-                    <small>{regulation.primaryZone} · 법정 BCR {regulation.statutoryLimit.bcrMax}% / FAR {regulation.statutoryLimit.farMax}%</small>
+                  <div className="capacity-basis">
+                    <span>현재 계산 기준</span>
+                    <strong>{regulation.primaryZone ?? regulation.statutoryLimit.zoneName}</strong>
+                    <p>대지 {formatArea(totalArea)} · BCR {formatPct(regulation.statutoryLimit.bcrMax)} · FAR {formatPct(regulation.statutoryLimit.farMax)}</p>
                   </div>
+
+                  <div className="metric-grid capacity-metrics">
+                    <div>
+                      <span>적용 대지면적</span>
+                      <strong>{formatArea(totalArea)}</strong>
+                      <small>{(totalArea / 3.305785).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</small>
+                    </div>
+                    <div>
+                      <span>법정 최대 건축면적</span>
+                      <strong>{formatArea(statutoryCapacity.footprint)}</strong>
+                      <small>BCR {formatPct(regulation.statutoryLimit.bcrMax)}</small>
+                    </div>
+                    <div>
+                      <span>법정 최대 연면적</span>
+                      <strong>{formatArea(statutoryCapacity.grossFloorArea)}</strong>
+                      <small>FAR {formatPct(regulation.statutoryLimit.farMax)}</small>
+                    </div>
+                  </div>
+
+                  <div className="capacity-subtitle">
+                    <strong>규모 시나리오</strong>
+                    <span>보수/기준안은 사업검토 가정이며 법적 기준이 아닙니다.</span>
+                  </div>
+
                   <div className="scenario-list">
                     {capacityScenarios.map((scenario) => (
-                      <article className="scenario-card" key={scenario.name}>
-                        <div className="scenario-head"><strong>{scenario.name}</strong><span>{scenario.note}</span></div>
+                      <article className={`scenario-card ${scenario.status === "STATUTORY" ? "statutory" : ""}`} key={scenario.name}>
+                        <div className="scenario-head">
+                          <strong>{scenario.name}</strong>
+                          <span>{scenario.note}</span>
+                        </div>
                         <dl>
                           <div><dt>건폐율</dt><dd>{formatPct(scenario.bcr)}</dd></div>
                           <div><dt>용적률</dt><dd>{formatPct(scenario.far)}</dd></div>
-                          <div><dt>최대 건축면적</dt><dd>{scenario.footprint.toLocaleString("ko-KR")}㎡</dd></div>
-                          <div><dt>최대 연면적</dt><dd>{scenario.grossFloorArea.toLocaleString("ko-KR")}㎡</dd></div>
+                          <div><dt>건축면적</dt><dd>{formatArea(scenario.footprint)}</dd></div>
+                          <div><dt>연면적</dt><dd>{formatArea(scenario.grossFloorArea)}</dd></div>
+                          <div><dt>연면적(평)</dt><dd>{scenario.grossFloorAreaPyeong.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</dd></div>
+                          <div><dt>단순 환산층수</dt><dd>{scenario.equivalentFloors.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}층</dd></div>
                         </dl>
                       </article>
                     ))}
                   </div>
-                  <div className="analysis-alert">보수·기준 시나리오의 80%/90%는 법정기준이 아니라 초기 사업검토용 가정입니다. 지자체 조례, 지구단위계획, 높이·일조·주차·도로·개별법 규제를 반영하면 실제 가능 규모는 달라질 수 있습니다.</div>
+
+                  <div className="capacity-subtitle">
+                    <strong>규제 반영 상태</strong>
+                    <span>어떤 값이 계산에 들어갔는지 추적합니다.</span>
+                  </div>
+                  <div className="capacity-status-list">
+                    <CapacityStatus label="대지면적 / PNU" status="반영" tone="ok" detail="VWorld 지적 필지" />
+                    <CapacityStatus label="용도지역" status="반영" tone="ok" detail={regulation.primaryZone ?? "세부지역 확인 필요"} />
+                    <CapacityStatus label="국가 건폐율·용적률" status="반영" tone="ok" detail={regulation.statutoryLimit.legalBasis} />
+                    <CapacityStatus label="지자체 조례" status="미반영" tone="pending" detail="조례 Rule DB 연결 예정" />
+                    <CapacityStatus
+                      label="지구단위계획 세부지침"
+                      status={regulation.districtPlans.length ? "검토 필요" : "중첩 없음"}
+                      tone={regulation.districtPlans.length ? "warn" : "neutral"}
+                      detail={regulation.districtPlans.length ? regulation.districtPlans.map((item) => item.name).join(", ") : "공간중첩 기준"}
+                    />
+                    <CapacityStatus label="인센티브 / 특례" status="미반영" tone="pending" detail="승인된 Regulation Rule만 향후 자동 적용" />
+                  </div>
+
+                  {parcels.length > 1 && (
+                    <div className="analysis-alert error">현재 REGULATION/CAPACITY 규제값은 첫 번째 선택 필지의 중심점 기준입니다. 복수 필지가 서로 다른 용도지역에 걸치는 경우 필지별 규제 계산으로 확장해야 정확합니다.</div>
+                  )}
+                  <div className="analysis-alert">단순 환산층수는 연면적 ÷ 건축면적의 기초 지표입니다. 실제 층수는 높이, 일조, 도로, 주차, 코어·공용부, 용적률 산입 제외면적, 지구단위계획 및 개별법 검토 후 달라집니다.</div>
+                  <div className="analysis-alert">현재 CAPACITY에는 국가 법정상한만 자동 반영됩니다. 앞서 구축한 규정 DB에서 서울시 조례·고시·인센티브 규칙이 검토 후 ACTIVE가 되면 이 단계에서 적용기준과 산식을 덮어쓰도록 연결합니다.</div>
                 </>
               ) : !regulationLoading && (
-                <div className="empty-site"><strong>CAPACITY 계산 대기</strong><p>세부 용도지역과 법정 건폐율·용적률 상한이 확인되어야 계산할 수 있습니다.</p></div>
+                <div className="empty-site"><strong>CAPACITY 계산 대기</strong><p>세부 용도지역과 건폐율·용적률 기준이 확인되어야 계산할 수 있습니다.</p></div>
               )}
             </div>
           )}
@@ -557,5 +649,27 @@ function RegulationGroup({ title, items }: { title: string; items: RegulationHit
         <p>중첩 없음</p>
       )}
     </section>
+  );
+}
+
+function CapacityStatus({
+  label,
+  status,
+  tone,
+  detail,
+}: {
+  label: string;
+  status: string;
+  tone: "ok" | "pending" | "warn" | "neutral";
+  detail: string;
+}) {
+  return (
+    <div className="capacity-status-row">
+      <div>
+        <strong>{label}</strong>
+        <small>{detail}</small>
+      </div>
+      <span className={`status-chip ${tone}`}>{status}</span>
+    </div>
   );
 }
