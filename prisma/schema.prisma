@@ -61,6 +61,32 @@ enum RegulationCombineMode {
   MANUAL_REVIEW
 }
 
+enum RegulationDocumentRelationType {
+  AMENDS
+  SUPERSEDES
+  REPEALS
+  IMPLEMENTS
+  REFERENCES
+  CORRECTS
+  CONSOLIDATES
+  RELATED_TO
+}
+
+enum RegulationScopeType {
+  COUNTRY
+  SIDO
+  SIGUNGU
+  EUPMYEONDONG
+  ADMIN_CODE
+  PNU
+  PNU_PREFIX
+  ADDRESS
+  PLAN_AREA
+  BBOX
+  POLYGON
+  CUSTOM
+}
+
 model Project {
   id         String     @id @default(uuid())
   name       String
@@ -118,17 +144,27 @@ model RegulationDocument {
   issuer             String?
   jurisdiction       String?
   documentType       String?
+  publicationType    String?
   documentNumber     String?
+  noticeNumber       String?
+  planName           String?
+  planType           String?
+  changeType         String?
   decisionDate       DateTime?
   publishedAt        DateTime?
   effectiveFrom      DateTime?
   effectiveTo        DateTime?
   status             RegulationDocumentStatus @default(UPLOADED)
+  sourceSystem       String?
   sourceFileName     String
   sourceMimeType     String?
   sourceStorageKey   String?
   sourceHash         String?
   sourceUrl          String?
+  officialSourceUrl  String?
+  officialVerifiedAt DateTime?
+  legalBasisJson     Json?
+  publicationMetaJson Json?
   extractionJson     Json?
   extractionVersion  String?
   extractedAt        DateTime?
@@ -141,15 +177,98 @@ model RegulationDocument {
   updatedAt          DateTime                 @updatedAt
 
   rules              RegulationRule[]
+  assets             RegulationDocumentAsset[]
+  spatialScopes      RegulationSpatialScope[]
+  outgoingRelations  RegulationDocumentRelation[] @relation("RegDocRelationFrom")
+  incomingRelations  RegulationDocumentRelation[] @relation("RegDocRelationTo")
 
   @@index([jurisdiction, status])
   @@index([documentGroupKey, revision])
+  @@index([documentNumber])
+  @@index([noticeNumber])
+  @@index([planName])
   @@index([decisionDate])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+model RegulationDocumentAsset {
+  id                 String              @id @default(uuid())
+  documentId         String
+  assetType          String?
+  title              String?
+  fileName           String
+  mimeType           String?
+  storageKey         String?
+  sourceUrl          String?
+  fileHash           String?
+  pageCount          Int?
+  sequence           Int                 @default(0)
+  extractionJson     Json?
+  metadataJson       Json?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  document           RegulationDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sourceRules        RegulationRule[]
+  spatialScopes      RegulationSpatialScope[]
+
+  @@index([documentId, sequence])
+  @@index([fileHash])
+}
+
+model RegulationDocumentRelation {
+  id                 String                         @id @default(uuid())
+  fromDocumentId     String
+  toDocumentId       String
+  relationType       RegulationDocumentRelationType
+  note               String?
+  sourceSection      String?
+  sourcePageStart    Int?
+  sourcePageEnd      Int?
+  createdAt          DateTime                       @default(now())
+
+  fromDocument       RegulationDocument             @relation("RegDocRelationFrom", fields: [fromDocumentId], references: [id], onDelete: Cascade)
+  toDocument         RegulationDocument             @relation("RegDocRelationTo", fields: [toDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([fromDocumentId, toDocumentId, relationType])
+  @@index([toDocumentId, relationType])
+}
+
+model RegulationSpatialScope {
+  id                 String               @id @default(uuid())
+  documentId         String
+  sourceAssetId      String?
+  scopeType          RegulationScopeType
+  name               String?
+  code               String?
+  pnu                String?
+  address            String?
+  geometryJson       Json?
+  bboxJson           Json?
+  metadataJson       Json?
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  sourceSection      String?
+  sourcePageStart    Int?
+  sourcePageEnd      Int?
+  sourceExcerpt      String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  document           RegulationDocument   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sourceAsset        RegulationDocumentAsset? @relation(fields: [sourceAssetId], references: [id], onDelete: SetNull)
+  ruleLinks          RegulationRuleScope[]
+
+  @@index([documentId, scopeType])
+  @@index([scopeType, code])
+  @@index([pnu])
+  @@index([effectiveFrom, effectiveTo])
 }
 
 model RegulationRule {
   id                 String                 @id @default(uuid())
   documentId         String
+  sourceAssetId      String?
   ruleKey            String
   version            Int                    @default(1)
   name               String
@@ -180,12 +299,29 @@ model RegulationRule {
   updatedAt          DateTime               @updatedAt
 
   document           RegulationDocument     @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  auditLogs           RegulationRuleAudit[]
+  sourceAsset        RegulationDocumentAsset? @relation(fields: [sourceAssetId], references: [id], onDelete: SetNull)
+  auditLogs          RegulationRuleAudit[]
+  scopeLinks         RegulationRuleScope[]
 
   @@unique([documentId, ruleKey, version])
   @@index([jurisdiction, kind, status])
   @@index([ruleKey, status])
   @@index([effectiveFrom, effectiveTo])
+}
+
+model RegulationRuleScope {
+  id                 String                 @id @default(uuid())
+  ruleId             String
+  scopeId            String
+  required           Boolean                @default(true)
+  exclusion          Boolean                @default(false)
+  createdAt          DateTime               @default(now())
+
+  rule               RegulationRule         @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  scope              RegulationSpatialScope @relation(fields: [scopeId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, scopeId])
+  @@index([scopeId, required, exclusion])
 }
 
 model RegulationRuleAudit {
