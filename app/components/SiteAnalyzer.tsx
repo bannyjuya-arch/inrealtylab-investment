@@ -10,6 +10,8 @@ type SelectedParcel = {
   id: string;
   pnu: string;
   jibun: string;
+  legalDong: string;
+  jimok: string;
   areaSqm: number;
   feature: any;
 };
@@ -53,7 +55,7 @@ function ensureOpenLayers(): Promise<any> {
 function pickProperty(properties: Record<string, unknown>, names: string[]) {
   for (const name of names) {
     const value = properties?.[name];
-    if (value !== undefined && value !== null && String(value).trim()) return String(value);
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
   }
   return "";
 }
@@ -95,8 +97,8 @@ export default function SiteAnalyzer() {
               SERVICE: "WMS",
               REQUEST: "GetMap",
               VERSION: "1.3.0",
-              LAYERS: "LP_PA_CBND_BUBUN",
-              STYLES: "LP_PA_CBND_BUBUN",
+              LAYERS: "lt_c_landinfobasemap",
+              STYLES: "lt_c_landinfobasemap",
               FORMAT: "image/png",
               TRANSPARENT: "true",
               CRS: "EPSG:3857",
@@ -176,6 +178,12 @@ export default function SiteAnalyzer() {
       const props = rawFeature.properties ?? {};
       const pnu = pickProperty(props, ["pnu", "PNU", "PNU_CD", "pnu_cd"]);
       const jibun = pickProperty(props, ["jibun", "JIBUN", "addr", "address", "JIBUN_ADDR"]);
+      const sido = pickProperty(props, ["sido_nm", "SIDO_NM"]);
+      const sgg = pickProperty(props, ["sgg_nm", "SGG_NM"]);
+      const emd = pickProperty(props, ["emd_nm", "EMD_NM"]);
+      const ri = pickProperty(props, ["ri_nm", "RI_NM"]);
+      const legalDong = [sido, sgg, emd, ri].filter(Boolean).join(" ");
+      const jimok = pickProperty(props, ["jimok", "JIMOK"]);
       const id = pnu || rawFeature.id || `${lon.toFixed(7)}-${lat.toFixed(7)}`;
 
       if (selectedSourceRef.current?.getFeatureById(id)) {
@@ -189,13 +197,22 @@ export default function SiteAnalyzer() {
       });
       feature.setId(id);
 
-      const geometry4326 = feature.getGeometry().clone().transform("EPSG:3857", "EPSG:4326");
-      const areaSqm = Math.round(ol.sphere.getArea(geometry4326));
+      // ol.sphere.getArea assumes EPSG:3857 by default, and this feature has
+      // already been reprojected to EPSG:3857 by GeoJSON.readFeature above.
+      const areaSqm = Math.round(ol.sphere.getArea(feature.getGeometry()));
       selectedSourceRef.current?.addFeature(feature);
 
       setParcels((current) => [
         ...current,
-        { id, pnu: pnu || "확인 필요", jibun: jibun || "지번 정보 없음", areaSqm, feature: rawFeature },
+        {
+          id,
+          pnu: pnu || "확인 필요",
+          jibun: jibun || "지번 정보 없음",
+          legalDong: legalDong || "법정동 정보 없음",
+          jimok: jimok || "지목 정보 없음",
+          areaSqm,
+          feature: rawFeature,
+        },
       ]);
 
       if (fitToParcel) {
@@ -319,7 +336,9 @@ export default function SiteAnalyzer() {
                   </div>
                   <dl>
                     <div><dt>PNU</dt><dd>{parcel.pnu}</dd></div>
+                    <div><dt>법정동</dt><dd>{parcel.legalDong}</dd></div>
                     <div><dt>지번</dt><dd>{parcel.jibun}</dd></div>
+                    <div><dt>지목</dt><dd>{parcel.jimok}</dd></div>
                     <div><dt>면적</dt><dd>{parcel.areaSqm.toLocaleString("ko-KR")}㎡</dd></div>
                   </dl>
                 </article>
