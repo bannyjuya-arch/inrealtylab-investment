@@ -9,7 +9,8 @@ function parseJsonOrJsonp(text: string) {
   try {
     return JSON.parse(trimmed);
   } catch {
-    const match = trimmed.match(/^[^(]+\((.*)\)\s*;?$/s);
+    // ES2017 target compatibility: avoid the RegExp dotAll (s) flag.
+    const match = trimmed.match(/^[^(]+\(([\s\S]*)\)\s*;?$/);
     if (!match) throw new Error(`응답 파싱 실패: ${trimmed.slice(0, 120)}`);
     return JSON.parse(match[1]);
   }
@@ -31,8 +32,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // VWorld 공식 교육 샘플과 동일하게 클릭 좌표 주변의 작은 BBOX를
-  // LX맵(편집지적도) WFS 레이어에서 조회한다.
+  // VWorld official sample pattern: query the cadastral base-map WFS layer
+  // using a very small BBOX around the clicked longitude/latitude.
   const delta = 0.000015;
   const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join(",");
 
