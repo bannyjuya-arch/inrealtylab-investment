@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-explicit-any, react-hooks/exhaustive-deps */
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -33,8 +33,11 @@ function ensureOpenLayers(): Promise<any> {
   return new Promise((resolve, reject) => {
     const existing = document.querySelector(`script[src="${OPENLAYERS_JS}"]`) as HTMLScriptElement | null;
     if (existing) {
-      existing.addEventListener("load", () => resolve((window as any).ol), { once: true });
-      existing.addEventListener("error", reject, { once: true });
+      if ((window as any).ol) resolve((window as any).ol);
+      else {
+        existing.addEventListener("load", () => resolve((window as any).ol), { once: true });
+        existing.addEventListener("error", reject, { once: true });
+      }
       return;
     }
 
@@ -175,7 +178,7 @@ export default function SiteAnalyzer() {
       const jibun = pickProperty(props, ["jibun", "JIBUN", "addr", "address", "JIBUN_ADDR"]);
       const id = pnu || rawFeature.id || `${lon.toFixed(7)}-${lat.toFixed(7)}`;
 
-      if (parcels.some((parcel) => parcel.id === id)) {
+      if (selectedSourceRef.current?.getFeatureById(id)) {
         setMessage("이미 선택된 필지입니다.");
         return;
       }
@@ -233,7 +236,8 @@ export default function SiteAnalyzer() {
   }
 
   function removeParcel(id: string) {
-    selectedSourceRef.current?.removeFeature(selectedSourceRef.current.getFeatureById(id));
+    const feature = selectedSourceRef.current?.getFeatureById(id);
+    if (feature) selectedSourceRef.current.removeFeature(feature);
     setParcels((current) => current.filter((parcel) => parcel.id !== id));
     setMessage("선택 필지를 해제했습니다.");
   }
