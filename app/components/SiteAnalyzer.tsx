@@ -21,6 +21,36 @@ type SearchResult = {
   point: { lon: number; lat: number };
 };
 
+type RegulationHit = {
+  layer: string;
+  category: string;
+  label: string;
+  name: string;
+  designationYear?: string | null;
+  designationNumber?: string | null;
+};
+
+type RegulationData = {
+  primaryZone: string | null;
+  useZones: RegulationHit[];
+  districts: RegulationHit[];
+  areas: RegulationHit[];
+  districtPlans: RegulationHit[];
+  developmentRestrictions: RegulationHit[];
+  landTransactionPermit: RegulationHit[];
+  statutoryLimit: null | {
+    zoneName: string;
+    bcrMax: number;
+    farMin: number;
+    farMax: number;
+    legalBasis: string;
+    effectiveDate: string;
+    scope: string;
+  };
+  warnings: string[];
+  layerErrors: Array<{ layer: string; label: string; message: string }>;
+};
+
 function ensureOpenLayers(): Promise<any> {
   if (typeof window === "undefined") return Promise.reject(new Error("browser only"));
   if ((window as any).ol) return Promise.resolve((window as any).ol);
@@ -60,6 +90,24 @@ function pickProperty(properties: Record<string, unknown>, names: string[]) {
   return "";
 }
 
+function getRawFeatureCenter(rawFeature: any) {
+  const geometry = rawFeature?.geometry;
+  if (!geometry) return null;
+  const ol = (window as any).ol;
+  if (!ol) return null;
+  const feature = new ol.format.GeoJSON().readFeature(rawFeature, {
+    dataProjection: "EPSG:4326",
+    featureProjection: "EPSG:3857",
+  });
+  const center3857 = ol.extent.getCenter(feature.getGeometry().getExtent());
+  const [lon, lat] = ol.proj.toLonLat(center3857);
+  return { lon, lat };
+}
+
+function formatPct(value: number) {
+  return `${value.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
+}
+
 export default function SiteAnalyzer() {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
@@ -71,11 +119,29 @@ export default function SiteAnalyzer() {
   const [loading, setLoading] = useState(false);
   const [cadastreVisible, setCadastreVisible] = useState(true);
   const [parcels, setParcels] = useState<SelectedParcel[]>([]);
+  const [activeTab, setActiveTab] = useState<"SITE" | "REGULATION" | "CAPACITY">("SITE");
+  const [regulation, setRegulation] = useState<RegulationData | null>(null);
+  const [regulationLoading, setRegulationLoading] = useState(false);
+  const [regulationError, setRegulationError] = useState("");
 
   const totalArea = useMemo(
     () => parcels.reduce((sum, parcel) => sum + parcel.areaSqm, 0),
     [parcels]
   );
+
+  const capacityScenarios = useMemo(() => {
+    const limit = regulation?.statutoryLimit;
+    if (!limit || totalArea <= 0) return [];
+    return [
+      { name: "보수", bcr: limit.bcrMax * 0.8, far: limit.farMax * 0.8, note: "법정상한의 80% 가정" },
+      { name: "기준", bcr: limit.bcrMax * 0.9, far: limit.farMax * 0.9, note: "법정상한의 90% 가정" },
+      { name: "법정최대", bcr: limit.bcrMax, far: limit.farMax, note: "시행령상 국가 법정상한" },
+    ].map((item) => ({
+      ...item,
+      footprint: Math.round(totalArea * (item.bcr / 100)),
+      grossFloorArea: Math.round(totalArea * (item.far / 100)),
+    }));
+  }, [regulation, totalArea]);
 
   useEffect(() => {
     let disposed = false;
@@ -156,6 +222,17 @@ export default function SiteAnalyzer() {
     layer?.setVisible(cadastreVisible);
   }, [cadastreVisible]);
 
+  useEffect(() => {
+    if (!parcels.length) {
+      setRegulation(null);
+      setRegulationError("");
+      setActiveTab("SITE");
+    } else {
+      setRegulation(null);
+      setRegulationError("");
+    }
+  }, [parcels]);
+
   async function fetchParcel(lon: number, lat: number) {
     const response = await fetch(`/api/cadastre?lon=${encodeURIComponent(lon)}&lat=${encodeURIComponent(lat)}`);
     const data = await response.json();
@@ -197,8 +274,6 @@ export default function SiteAnalyzer() {
       });
       feature.setId(id);
 
-      // ol.sphere.getArea assumes EPSG:3857 by default, and this feature has
-      // already been reprojected to EPSG:3857 by GeoJSON.readFeature above.
       const areaSqm = Math.round(ol.sphere.getArea(feature.getGeometry()));
       selectedSourceRef.current?.addFeature(feature);
 
@@ -252,6 +327,33 @@ export default function SiteAnalyzer() {
     }
   }
 
+  async function loadRegulation(nextTab: "REGULATION" | "CAPACITY") {
+    if (!parcels.length) return;
+    setActiveTab(nextTab);
+    if (regulation || regulationLoading) return;
+
+    const center = getRawFeatureCenter(parcels[0].feature);
+    if (!center) {
+      setRegulationError("선택 필지의 중심 좌표를 계산하지 못했습니다.");
+      return;
+    }
+
+    setRegulationLoading(true);
+    setRegulationError("");
+    try {
+      const response = await fetch(
+        `/api/regulation?lon=${encodeURIComponent(center.lon)}&lat=${encodeURIComponent(center.lat)}&pnu=${encodeURIComponent(parcels[0].pnu)}`
+      );
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회에 실패했습니다.");
+      setRegulation(data.regulation);
+    } catch (error) {
+      setRegulationError(error instanceof Error ? error.message : "규제정보 조회에 실패했습니다.");
+    } finally {
+      setRegulationLoading(false);
+    }
+  }
+
   function removeParcel(id: string) {
     const feature = selectedSourceRef.current?.getFeatureById(id);
     if (feature) selectedSourceRef.current.removeFeature(feature);
@@ -273,7 +375,7 @@ export default function SiteAnalyzer() {
           <h1>대지를 선택하면 분석이 시작됩니다.</h1>
           <p>지도에서 실제 지적 필지를 지정하고 PNU와 대지면적을 확보하는 첫 단계입니다.</p>
         </div>
-        <div className="beta-chip">CORE v0.2</div>
+        <div className="beta-chip">CORE v0.3</div>
       </header>
 
       <form className="map-search" onSubmit={handleSearch}>
@@ -306,54 +408,154 @@ export default function SiteAnalyzer() {
 
         <aside className="analysis-panel">
           <div className="analysis-tabs">
-            <button className="active">SITE</button>
-            <button disabled>REGULATION</button>
-            <button disabled>CAPACITY</button>
+            <button className={activeTab === "SITE" ? "active" : ""} onClick={() => setActiveTab("SITE")}>SITE</button>
+            <button className={activeTab === "REGULATION" ? "active" : ""} disabled={!parcels.length} onClick={() => loadRegulation("REGULATION")}>REGULATION</button>
+            <button className={activeTab === "CAPACITY" ? "active" : ""} disabled={!parcels.length} onClick={() => loadRegulation("CAPACITY")}>CAPACITY</button>
           </div>
 
-          <div className="analysis-summary">
-            <span>선택 필지</span>
-            <strong>{parcels.length}필지</strong>
-          </div>
-          <div className="analysis-summary">
-            <span>통합 대지면적</span>
-            <strong>{totalArea.toLocaleString("ko-KR")}㎡</strong>
-            <small>{(totalArea / 3.305785).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</small>
-          </div>
-
-          <div className="parcel-list">
-            {parcels.length === 0 ? (
-              <div className="empty-site">
-                <strong>대지를 선택하세요.</strong>
-                <p>주소 검색 또는 지도 클릭으로 실제 필지를 선택할 수 있습니다.</p>
+          {activeTab === "SITE" && (
+            <>
+              <div className="analysis-summary">
+                <span>선택 필지</span>
+                <strong>{parcels.length}필지</strong>
               </div>
-            ) : (
-              parcels.map((parcel, index) => (
-                <article className="parcel-card" key={parcel.id}>
-                  <div className="parcel-card-head">
-                    <span>필지 {index + 1}</span>
-                    <button type="button" onClick={() => removeParcel(parcel.id)}>제거</button>
-                  </div>
-                  <dl>
-                    <div><dt>PNU</dt><dd>{parcel.pnu}</dd></div>
-                    <div><dt>법정동</dt><dd>{parcel.legalDong}</dd></div>
-                    <div><dt>지번</dt><dd>{parcel.jibun}</dd></div>
-                    <div><dt>지목</dt><dd>{parcel.jimok}</dd></div>
-                    <div><dt>면적</dt><dd>{parcel.areaSqm.toLocaleString("ko-KR")}㎡</dd></div>
-                  </dl>
-                </article>
-              ))
-            )}
-          </div>
+              <div className="analysis-summary">
+                <span>통합 대지면적</span>
+                <strong>{totalArea.toLocaleString("ko-KR")}㎡</strong>
+                <small>{(totalArea / 3.305785).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</small>
+              </div>
 
-          <div className="next-step-card">
-            <span>NEXT</span>
-            <strong>법적 규제 분석</strong>
-            <p>선택된 PNU를 기준으로 용도지역·지구·구역, 도시계획시설과 건폐율·용적률을 연결합니다.</p>
-            <button type="button" disabled>다음 개발 단계</button>
-          </div>
+              <div className="parcel-list">
+                {parcels.length === 0 ? (
+                  <div className="empty-site">
+                    <strong>대지를 선택하세요.</strong>
+                    <p>주소 검색 또는 지도 클릭으로 실제 필지를 선택할 수 있습니다.</p>
+                  </div>
+                ) : (
+                  parcels.map((parcel, index) => (
+                    <article className="parcel-card" key={parcel.id}>
+                      <div className="parcel-card-head">
+                        <span>필지 {index + 1}</span>
+                        <button type="button" onClick={() => removeParcel(parcel.id)}>제거</button>
+                      </div>
+                      <dl>
+                        <div><dt>PNU</dt><dd>{parcel.pnu}</dd></div>
+                        <div><dt>법정동</dt><dd>{parcel.legalDong}</dd></div>
+                        <div><dt>지번</dt><dd>{parcel.jibun}</dd></div>
+                        <div><dt>지목</dt><dd>{parcel.jimok}</dd></div>
+                        <div><dt>면적</dt><dd>{parcel.areaSqm.toLocaleString("ko-KR")}㎡</dd></div>
+                      </dl>
+                    </article>
+                  ))
+                )}
+              </div>
+
+              <div className="next-step-card">
+                <span>NEXT</span>
+                <strong>법적 규제 분석</strong>
+                <p>선택된 PNU를 기준으로 용도지역·지구·구역과 국가 법정 건폐율·용적률 범위를 조회합니다.</p>
+                <button type="button" disabled={!parcels.length} onClick={() => loadRegulation("REGULATION")}>REGULATION 보기</button>
+              </div>
+            </>
+          )}
+
+          {activeTab === "REGULATION" && (
+            <div className="regulation-view">
+              <div className="section-title-row">
+                <div><span>REGULATION</span><strong>법적 규제 분석</strong></div>
+                {regulationLoading && <small>조회 중...</small>}
+              </div>
+              {regulationError && <div className="analysis-alert error">{regulationError}</div>}
+              {!regulation && !regulationLoading && !regulationError && <div className="empty-site">규제정보를 불러오지 못했습니다.</div>}
+              {regulation && (
+                <>
+                  <div className="metric-grid">
+                    <div><span>주요 용도지역</span><strong>{regulation.primaryZone ?? "확인 필요"}</strong></div>
+                    <div><span>건폐율 상한</span><strong>{regulation.statutoryLimit ? formatPct(regulation.statutoryLimit.bcrMax) : "-"}</strong></div>
+                    <div><span>용적률 상한</span><strong>{regulation.statutoryLimit ? formatPct(regulation.statutoryLimit.farMax) : "-"}</strong></div>
+                  </div>
+
+                  <div className="regulation-groups">
+                    <RegulationGroup title="용도지역" items={regulation.useZones} />
+                    <RegulationGroup title="용도지구" items={regulation.districts} />
+                    <RegulationGroup title="용도구역" items={regulation.areas} />
+                    <RegulationGroup title="지구단위계획" items={regulation.districtPlans} />
+                    <RegulationGroup title="개발행위 제한" items={regulation.developmentRestrictions} />
+                    <RegulationGroup title="토지거래허가" items={regulation.landTransactionPermit} />
+                  </div>
+
+                  {regulation.statutoryLimit && (
+                    <div className="source-note">
+                      <strong>{regulation.statutoryLimit.legalBasis}</strong>
+                      <span>시행기준 {regulation.statutoryLimit.effectiveDate}</span>
+                      <p>{regulation.statutoryLimit.scope}</p>
+                    </div>
+                  )}
+                  {regulation.warnings.map((warning) => <div className="analysis-alert" key={warning}>{warning}</div>)}
+                  {!!regulation.layerErrors.length && (
+                    <div className="analysis-alert">일부 주제도 조회 실패 {regulation.layerErrors.length}건 — 다른 규제 결과는 그대로 표시합니다.</div>
+                  )}
+
+                  <div className="next-step-card">
+                    <span>NEXT</span>
+                    <strong>개발가능 규모</strong>
+                    <p>확인된 대지면적과 법정 건폐율·용적률을 기준으로 보수·기준·법정최대 시나리오를 계산합니다.</p>
+                    <button type="button" onClick={() => setActiveTab("CAPACITY")}>CAPACITY 보기</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {activeTab === "CAPACITY" && (
+            <div className="capacity-view">
+              <div className="section-title-row">
+                <div><span>CAPACITY</span><strong>개발가능 규모</strong></div>
+                {regulationLoading && <small>규제정보 조회 중...</small>}
+              </div>
+              {regulationError && <div className="analysis-alert error">{regulationError}</div>}
+              {regulation && regulation.statutoryLimit ? (
+                <>
+                  <div className="analysis-summary">
+                    <span>적용 대지면적</span>
+                    <strong>{totalArea.toLocaleString("ko-KR")}㎡</strong>
+                    <small>{regulation.primaryZone} · 법정 BCR {regulation.statutoryLimit.bcrMax}% / FAR {regulation.statutoryLimit.farMax}%</small>
+                  </div>
+                  <div className="scenario-list">
+                    {capacityScenarios.map((scenario) => (
+                      <article className="scenario-card" key={scenario.name}>
+                        <div className="scenario-head"><strong>{scenario.name}</strong><span>{scenario.note}</span></div>
+                        <dl>
+                          <div><dt>건폐율</dt><dd>{formatPct(scenario.bcr)}</dd></div>
+                          <div><dt>용적률</dt><dd>{formatPct(scenario.far)}</dd></div>
+                          <div><dt>최대 건축면적</dt><dd>{scenario.footprint.toLocaleString("ko-KR")}㎡</dd></div>
+                          <div><dt>최대 연면적</dt><dd>{scenario.grossFloorArea.toLocaleString("ko-KR")}㎡</dd></div>
+                        </dl>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="analysis-alert">보수·기준 시나리오의 80%/90%는 법정기준이 아니라 초기 사업검토용 가정입니다. 지자체 조례, 지구단위계획, 높이·일조·주차·도로·개별법 규제를 반영하면 실제 가능 규모는 달라질 수 있습니다.</div>
+                </>
+              ) : !regulationLoading && (
+                <div className="empty-site"><strong>CAPACITY 계산 대기</strong><p>세부 용도지역과 법정 건폐율·용적률 상한이 확인되어야 계산할 수 있습니다.</p></div>
+              )}
+            </div>
+          )}
         </aside>
       </section>
     </main>
+  );
+}
+
+function RegulationGroup({ title, items }: { title: string; items: RegulationHit[] }) {
+  return (
+    <section className="regulation-group">
+      <div className="regulation-group-head"><strong>{title}</strong><span>{items.length}건</span></div>
+      {items.length ? (
+        <ul>{items.map((item, index) => <li key={`${item.layer}-${item.name}-${index}`}><span>{item.name}</span><small>{item.label}</small></li>)}</ul>
+      ) : (
+        <p>중첩 없음</p>
+      )}
+    </section>
   );
 }
