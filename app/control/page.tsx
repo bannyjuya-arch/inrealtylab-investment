@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import "./control.css";
 
 type Gate = {
@@ -53,32 +53,120 @@ type OwnershipResponse = {
   };
 };
 
+type ParcelResult = {
+  pnu: string;
+  result: OwnershipResponse;
+};
+
+function isValidPnu(value: string) {
+  return /^\d{10}[12]\d{8}$/.test(value);
+}
+
+function unique(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
 export default function ControlPage() {
   const [pnu, setPnu] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<OwnershipResponse | null>(null);
+  const [parcelResults, setParcelResults] = useState<ParcelResult[]>([]);
+  const [pageError, setPageError] = useState("");
 
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (!/^\d{19}$/.test(pnu.trim())) {
-      setResult({ ok: false, message: "19자리 PNU를 입력해 주세요." });
+  async function lookupPnus(pnus: string[]) {
+    const validPnus = unique(pnus.map((item) => item.trim())).filter(isValidPnu);
+    if (!validPnus.length) {
+      setPageError("유효한 PNU가 없습니다. 현황분석에서 필지를 다시 선택해 주세요.");
+      setParcelResults([]);
       return;
     }
 
     setLoading(true);
+    setPageError("");
     try {
-      const response = await fetch(`/api/ownership?pnu=${encodeURIComponent(pnu.trim())}`);
-      const data = (await response.json()) as OwnershipResponse;
-      setResult(data);
-    } catch (error) {
-      setResult({ ok: false, message: error instanceof Error ? error.message : "조회 중 오류가 발생했습니다." });
+      const responses = await Promise.all(
+        validPnus.map(async (item) => {
+          try {
+            const response = await fetch(`/api/ownership?pnu=${encodeURIComponent(item)}`, { cache: "no-store" });
+            const data = (await response.json()) as OwnershipResponse;
+            return { pnu: item, result: data };
+          } catch (error) {
+            return {
+              pnu: item,
+              result: {
+                ok: false,
+                message: error instanceof Error ? error.message : "조회 중 오류가 발생했습니다.",
+              },
+            };
+          }
+        })
+      );
+      setParcelResults(responses);
     } finally {
       setLoading(false);
     }
   }
 
-  const assessment = result?.assessment;
-  const firstRecord = result?.records?.[0];
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromSite = params.get("pnus") ?? params.get("pnu") ?? "";
+    const pnus = fromSite.split(",").map((item) => item.trim()).filter(Boolean);
+    if (!pnus.length) return;
+
+    setPnu(pnus[0]);
+    void lookupPnus(pnus);
+  }, []);
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    const value = pnu.trim();
+    if (!isValidPnu(value)) {
+      setPageError("PNU는 19자리이며 11번째 자리는 일반필지 1 또는 산 2여야 합니다.");
+      setParcelResults([]);
+      return;
+    }
+    void lookupPnus([value]);
+  }
+
+  const successful = parcelResults.filter((item) => item.result.ok && item.result.assessment);
+  const failures = parcelResults.filter((item) => !item.result.ok);
+  const assessments = successful.map((item) => item.result.assessment!);
+
+  const overall = useMemo(() => {
+    if (!parcelResults.length) return null;
+    if (failures.length) {
+      return {
+        status: "REVIEW",
+        headline: "일부 필지 소유정보 확인 필요",
+        summary: `${parcelResults.length}개 필지 중 ${failures.length}개 필지의 소유정보를 확인하지 못했습니다. 모든 필지 확인 전에는 사업추진 가능성을 확정하지 않습니다.`,
+      };
+    }
+
+    if (assessments.some((item) => item.readiness === "OUT_OF_SCOPE_PRIVATE")) {
+      return {
+        status: "PRIVATE",
+        headline: "민간소유 포함 — 현재 검토대상 제외",
+        summary: "선택 필지 중 민간소유가 포함되어 현재 INRealtyLab Part 2 분석대상에서 제외합니다.",
+      };
+    }
+
+    if (assessments.length && assessments.every((item) => item.inScope)) {
+      return {
+        status: "PUBLIC",
+        headline: "선택 필지 공공소유 확인 — 후속 사업추진 검토 가능",
+        summary: `${assessments.length}개 필지 모두 공공소유로 확인되었습니다. 관리주체·재산구분·현재 사용상태·의사결정권자를 추가 확인합니다.`,
+      };
+    }
+
+    return {
+      status: "REVIEW",
+      headline: "공공소유 여부 추가 확인 필요",
+      summary: "선택 필지 중 소유구분이 명확하지 않은 필지가 있어 후속 사업추진 분석을 보류합니다.",
+    };
+  }, [parcelResults, failures.length, assessments]);
+
+  const gates = successful.find((item) => item.result.assessment?.inScope)?.result.assessment?.gates ?? [];
+  const candidateRoutes = unique(successful.flatMap((item) => item.result.assessment?.candidateRoutes ?? []));
+  const unresolved = unique(successful.flatMap((item) => item.result.assessment?.unresolved ?? []));
 
   return (
     <main className="control-shell">
@@ -86,52 +174,70 @@ export default function ControlPage() {
         <div>
           <div className="product-kicker">INRealtyLab · Part 2</div>
           <h1>소유 · 사업추진 가능성 분석</h1>
-          <p>공공소유 여부를 먼저 확인하고, 관리주체·재산구분·현재 사용상태를 거쳐 사업추진 구조를 검토합니다.</p>
+          <p>현황분석에서 선택한 필지의 PNU를 자동으로 넘겨 공공소유 여부부터 확인합니다.</p>
         </div>
         <a className="control-back" href="/">현황분석으로</a>
       </header>
 
       <section className="control-policy-card">
         <strong>현재 분석대상</strong>
-        <p>국가 · 지방자치단체 · 공공기관 등 공공소유 부지만 검토합니다. 민간소유가 확인되면 Part 2 분석을 종료합니다.</p>
+        <p>국가 · 지방자치단체 · 공공기관 등 공공소유 부지만 검토합니다. 선택 필지 중 민간소유가 하나라도 확인되면 Part 2 분석을 종료합니다.</p>
       </section>
 
       <form className="control-search" onSubmit={handleSubmit}>
         <input
           value={pnu}
           onChange={(event) => setPnu(event.target.value.replace(/\D/g, "").slice(0, 19))}
-          placeholder="19자리 PNU 입력"
+          placeholder="현황분석에서 자동 전달 · 필요 시 PNU 직접 입력"
           inputMode="numeric"
           aria-label="PNU 입력"
         />
-        <button disabled={loading} type="submit">{loading ? "조회 중" : "소유 확인"}</button>
+        <button disabled={loading} type="submit">{loading ? "자동 조회 중" : "다시 조회"}</button>
       </form>
 
-      {result && !result.ok && <div className="control-error">{result.message}</div>}
+      {loading && <div className="control-policy-card"><strong>선택 필지 소유정보를 자동 조회하고 있습니다.</strong></div>}
+      {pageError && <div className="control-error">{pageError}</div>}
 
-      {result?.ok && assessment && (
+      {overall && (
         <div className="control-layout">
           <section className="control-summary-card">
             <div className="control-summary-head">
               <div>
-                <span>OWNERSHIP GATE</span>
-                <strong>{assessment.headline}</strong>
+                <span>OWNERSHIP GATE · {parcelResults.length} PARCELS</span>
+                <strong>{overall.headline}</strong>
               </div>
-              <StatusBadge inScope={assessment.inScope} readiness={assessment.readiness} />
+              <span className={`control-badge ${overall.status === "PUBLIC" ? "public" : overall.status === "PRIVATE" ? "private" : "review"}`}>
+                {overall.status === "PUBLIC" ? "공공소유 · 후속검토" : overall.status === "PRIVATE" ? "검토대상 제외" : "확인 필요"}
+              </span>
             </div>
-            <p>{assessment.summary}</p>
+            <p>{overall.summary}</p>
+          </section>
 
-            <div className="control-metrics">
-              <Metric label="소유구분" value={assessment.ownerClasses.join(", ") || "확인 필요"} />
-              <Metric label="소유주체 유형" value={firstRecord?.ownerTypeLabel ?? "확인 필요"} />
-              <Metric label="법정동" value={firstRecord?.legalDong ?? "-"} />
-              <Metric label="지번" value={firstRecord?.jibun ?? "-"} />
-              <Metric label="지목" value={firstRecord?.landCategory ?? "-"} />
-              <Metric label="공유인수" value={firstRecord ? `${firstRecord.coOwnerCount.toLocaleString("ko-KR")}명` : "-"} />
+          <section className="control-section">
+            <div className="control-section-title">
+              <span>PARCEL OWNERSHIP</span>
+              <strong>필지별 소유확인</strong>
+            </div>
+            <div className="route-list">
+              {parcelResults.map(({ pnu: parcelPnu, result }, index) => {
+                const assessment = result.assessment;
+                const record = result.records?.[0];
+                return (
+                  <article key={parcelPnu} style={{ display: "block" }}>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <strong>{assessment?.ownerClasses.join(", ") || result.message || "확인 필요"}</strong>
+                    <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6 }}>
+                      PNU {parcelPnu}<br />
+                      {record?.legalDong ? `${record.legalDong} ${record.jibun}` : "소재지 정보 확인 필요"}<br />
+                      소유주체 유형 {record?.ownerTypeLabel ?? "확인 필요"}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </section>
 
-          {assessment.inScope ? (
+          {overall.status === "PUBLIC" && (
             <>
               <section className="control-section">
                 <div className="control-section-title">
@@ -139,13 +245,10 @@ export default function ControlPage() {
                   <strong>사업추진 선결조건</strong>
                 </div>
                 <div className="gate-list">
-                  {assessment.gates.map((gate) => (
+                  {gates.map((gate) => (
                     <article className="gate-row" key={gate.key}>
-                      <div>
-                        <strong>{gate.label}</strong>
-                        <p>{gate.detail}</p>
-                      </div>
-                      <span className={`gate-status ${gate.status.toLowerCase()}`}>{gate.status === "PASS" ? "확인" : gate.status === "FAIL" ? "제외" : "확인 필요"}</span>
+                      <div><strong>{gate.label}</strong><p>{gate.detail}</p></div>
+                      <span className={`gate-status ${gate.status.toLowerCase()}`}>{gate.status === "PASS" ? "확인" : "확인 필요"}</span>
                     </article>
                   ))}
                 </div>
@@ -154,46 +257,37 @@ export default function ControlPage() {
               <section className="control-section">
                 <div className="control-section-title">
                   <span>DELIVERY OPTIONS</span>
-                  <strong>검토 가능한 사업추진 방식</strong>
+                  <strong>1차 사업추진 방식 후보</strong>
                 </div>
-                {assessment.governingRegime && <div className="regime-note">{assessment.governingRegime}</div>}
                 <div className="route-list">
-                  {assessment.candidateRoutes.map((route, index) => (
-                    <article key={route}>
-                      <span>{String(index + 1).padStart(2, "0")}</span>
-                      <strong>{route}</strong>
-                    </article>
+                  {candidateRoutes.map((route, index) => (
+                    <article key={route}><span>{String(index + 1).padStart(2, "0")}</span><strong>{route}</strong></article>
                   ))}
                 </div>
-                <div className="control-warning">
-                  위 사업방식은 소유구분만으로 도출한 1차 후보입니다. 관리주체, 재산구분, 현재 사용상태와 권한관계를 확인하기 전에는 실제 추진 가능 방식으로 확정하지 않습니다.
-                </div>
+                <div className="control-warning">관리주체, 재산구분, 현재 사용상태와 권한관계를 확인하기 전에는 실제 추진 가능 방식으로 확정하지 않습니다.</div>
               </section>
 
               <section className="control-section">
-                <div className="control-section-title">
-                  <span>NEXT DATA</span>
-                  <strong>추가 확인 필요정보</strong>
-                </div>
-                <ul className="unresolved-list">
-                  {assessment.unresolved.map((item) => <li key={item}>{item}</li>)}
-                </ul>
+                <div className="control-section-title"><span>NEXT DATA</span><strong>추가 확인 필요정보</strong></div>
+                <ul className="unresolved-list">{unresolved.map((item) => <li key={item}>{item}</li>)}</ul>
               </section>
             </>
-          ) : (
+          )}
+
+          {failures.length > 0 && (
             <section className="out-of-scope-card">
-              <strong>{assessment.readiness === "OUT_OF_SCOPE_PRIVATE" ? "민간소유 부지는 현재 분석하지 않습니다." : "공공소유 확인이 필요합니다."}</strong>
-              <p>공공소유 부지만 관리주체·재산구분·PPP/위탁개발 등 후속 분석으로 진행합니다.</p>
+              <strong>조회 실패 필지</strong>
+              {failures.map((item) => <p key={item.pnu}>{item.pnu} · {item.result.message}</p>)}
             </section>
           )}
 
           <section className="source-trace-card">
             <strong>Source Trace</strong>
             <dl>
-              <div><dt>출처</dt><dd>{result.source?.name}</dd></div>
-              <div><dt>PNU</dt><dd>{result.pnu}</dd></div>
-              <div><dt>데이터 기준일</dt><dd>{firstRecord?.dataDate ?? "응답값 없음"}</dd></div>
-              <div><dt>조회시각</dt><dd>{result.source?.queriedAt ? new Date(result.source.queriedAt).toLocaleString("ko-KR") : "-"}</dd></div>
+              <div><dt>출처</dt><dd>VWorld 국토정보 토지소유정보</dd></div>
+              <div><dt>조회 필지수</dt><dd>{parcelResults.length}필지</dd></div>
+              <div><dt>확인 성공</dt><dd>{successful.length}필지</dd></div>
+              <div><dt>조회 실패</dt><dd>{failures.length}필지</dd></div>
             </dl>
             <p>개인 성명·주민등록번호·상세 거주지 등 개인정보는 표시하지 않습니다.</p>
           </section>
@@ -201,13 +295,4 @@ export default function ControlPage() {
       )}
     </main>
   );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div><span>{label}</span><strong>{value}</strong></div>;
-}
-
-function StatusBadge({ inScope, readiness }: { inScope: boolean; readiness: string }) {
-  const label = inScope ? "공공소유 · 후속검토" : readiness === "OUT_OF_SCOPE_PRIVATE" ? "검토대상 제외" : "소유 확인 필요";
-  return <span className={`control-badge ${inScope ? "public" : readiness === "OUT_OF_SCOPE_PRIVATE" ? "private" : "review"}`}>{label}</span>;
 }
