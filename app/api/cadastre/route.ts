@@ -40,7 +40,8 @@ function extractServiceException(text: string) {
 export async function GET(req: NextRequest) {
   const lon = Number(req.nextUrl.searchParams.get("lon"));
   const lat = Number(req.nextUrl.searchParams.get("lat"));
-  const key = process.env.VWORLD_API_KEY;
+  const key = process.env.VWORLD_API_KEY?.trim();
+  const domain = process.env.VWORLD_API_DOMAIN?.trim();
 
   if (!Number.isFinite(lon) || !Number.isFinite(lat)) {
     return NextResponse.json({ ok: false, message: "유효한 좌표가 필요합니다." }, { status: 400 });
@@ -67,6 +68,7 @@ export async function GET(req: NextRequest) {
     BBOX: bbox,
     callback: "parseResponse",
   });
+  if (domain) params.set("domain", domain);
 
   try {
     const response = await fetch(`${VWORLD_WFS_URL}?${params.toString()}`, {
