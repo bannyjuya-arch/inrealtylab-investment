@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import PublicAssetDetails from "./PublicAssetDetails";
 import "./control.css";
 
 type Gate = {
@@ -231,6 +232,13 @@ export default function ControlPage() {
                       {record?.legalDong ? `${record.legalDong} ${record.jibun}` : "소재지 정보 확인 필요"}<br />
                       소유주체 유형 {record?.ownerTypeLabel ?? "확인 필요"}
                     </div>
+                    {record && (
+                      <PublicAssetDetails
+                        ownerType={record.ownerType}
+                        legalDong={record.legalDong}
+                        jibun={record.jibun}
+                      />
+                    )}
                   </article>
                 );
               })}
@@ -289,6 +297,7 @@ export default function ControlPage() {
               <div><dt>확인 성공</dt><dd>{successful.length}필지</dd></div>
               <div><dt>조회 실패</dt><dd>{failures.length}필지</dd></div>
             </dl>
+            <p>서울 시·도유지인 경우 서울특별시 시유재산 공개자료를 추가 조회해 재산관리관 후보를 표시합니다.</p>
             <p>개인 성명·주민등록번호·상세 거주지 등 개인정보는 표시하지 않습니다.</p>
           </section>
         </div>
