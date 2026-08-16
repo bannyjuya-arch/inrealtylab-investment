@@ -3,8 +3,8 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-const OPENLAYERS_JS = "https://openlayers.org/en/latest/build/ol.js";
-const OPENLAYERS_CSS = "https://openlayers.org/en/latest/css/ol.css";
+const OPENLAYERS_JS = "https://cdn.jsdelivr.net/npm/ol@10.9.0/dist/ol.js";
+const OPENLAYERS_CSS = "https://cdn.jsdelivr.net/npm/ol@10.9.0/ol.css";
 
 type SelectedParcel = {
   id: string;
