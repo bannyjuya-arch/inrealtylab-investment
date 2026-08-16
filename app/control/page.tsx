@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import "./control.css";
 
 type Gate = {
   key: string;
