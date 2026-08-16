@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 const LAND_OWNERSHIP_URL = "https://api.vworld.kr/ned/data/getPossessionAttr";
 
 type RawOwnership = Record<string, unknown>;
+type AssetClassStatus = "ADMINISTRATIVE" | "GENERAL" | "UNKNOWN";
 
 function asText(value: unknown) {
   return value === undefined || value === null ? "" : String(value).trim();
@@ -72,6 +73,55 @@ function normalizeRecord(record: RawOwnership) {
   };
 }
 
+function buildCandidateRoutes(ownerTypes: string[], assetClass: AssetClassStatus) {
+  if (ownerTypes.includes("STATE")) {
+    if (assetClass === "ADMINISTRATIVE") {
+      return [
+        "행정재산 관리위탁·사용허가 가능성 검토",
+        "기존 공공기능 유지형 복합화 가능성 검토",
+        "민간투자법 적용 가능성 검토",
+      ];
+    }
+    if (assetClass === "GENERAL") {
+      return [
+        "일반재산 개발·대부 가능성 검토",
+        "비소유형 장기대부·사용수익 구조 검토",
+        "민간투자법 적용 가능성 검토",
+      ];
+    }
+    return ["행정재산/일반재산 확인 후 국유재산 사업구조 판정", "민간투자법 적용 가능성 검토"];
+  }
+
+  if (ownerTypes.includes("LOCAL_GOVERNMENT")) {
+    if (assetClass === "ADMINISTRATIVE") {
+      return [
+        "행정재산 관리위탁·사용허가 가능성 검토",
+        "기존 공공기능 유지형 복합화 가능성 검토",
+        "용도폐지·변경 필요 여부 선행 검토",
+        "민간투자법 적용 가능성 검토",
+      ];
+    }
+    if (assetClass === "GENERAL") {
+      return [
+        "일반재산 위탁관리·위탁개발 가능성 검토",
+        "대부·사용수익 기반 사업구조 검토",
+        "민간투자법 적용 가능성 검토",
+      ];
+    }
+    return [
+      "행정재산/일반재산 확인 후 공유재산 사업구조 판정",
+      "현재 공공기능 유지 여부 확인",
+      "민간투자법 적용 가능성 검토",
+    ];
+  }
+
+  if (ownerTypes.includes("PUBLIC_ENTITY")) {
+    return ["공공기관 자체개발", "민관 공동사업", "장기임대·사용수익 구조", "민간투자법 적용 가능성 검토"];
+  }
+
+  return [];
+}
+
 function assess(records: ReturnType<typeof normalizeRecord>[]) {
   const ownerSectors = unique(records.map((record) => record.ownerSector));
   const ownerTypes = unique(records.map((record) => record.ownerType));
@@ -89,6 +139,8 @@ function assess(records: ReturnType<typeof normalizeRecord>[]) {
         "INRealtyLab의 소유·사업추진 가능성 분석은 현재 공공소유 부지를 대상으로 합니다. 민간소유가 포함된 필지는 후속 관리주체·PPP 분석을 진행하지 않습니다.",
       ownerClasses,
       ownerTypes,
+      assetClass: "UNKNOWN" as AssetClassStatus,
+      assetClassBasis: "민간소유 포함으로 재산구분 분석 미진행",
       gates: [
         { key: "OWNERSHIP", label: "공공소유 여부", status: "FAIL", detail: ownerClasses.join(", ") },
       ],
@@ -105,6 +157,8 @@ function assess(records: ReturnType<typeof normalizeRecord>[]) {
       summary: "소유구분이 명확히 공공으로 확인되기 전에는 사업추진 가능성 분석을 진행하지 않습니다.",
       ownerClasses,
       ownerTypes,
+      assetClass: "UNKNOWN" as AssetClassStatus,
+      assetClassBasis: "공공소유 확정 전 재산구분 분석 미진행",
       gates: [
         { key: "OWNERSHIP", label: "공공소유 여부", status: "REVIEW", detail: ownerClasses.join(", ") || "조회 결과 없음" },
       ],
@@ -113,43 +167,49 @@ function assess(records: ReturnType<typeof normalizeRecord>[]) {
     };
   }
 
-  let candidateRoutes: string[] = [];
-  let governingRegime = "공공자산 관련 법령·기관 규정 확인";
+  // VWorld 토지소유정보만으로는 행정재산/일반재산을 확정할 수 없다.
+  // 향후 공유재산대장·국유재산대장 등 공식 재산구분 데이터가 연결되면
+  // 이 값을 ADMINISTRATIVE 또는 GENERAL로 치환하고 buildCandidateRoutes에서 자동 분기한다.
+  const assetClass: AssetClassStatus = "UNKNOWN";
+  const assetClassBasis = "공식 재산구분 데이터 미연결 — 현재 사용용도만으로 법적 재산구분을 확정하지 않음";
 
-  if (ownerTypes.includes("STATE")) {
-    governingRegime = "국유재산법 체계 검토";
-    candidateRoutes = ["행정재산 관리위탁 가능성 검토", "일반재산 개발·대부 가능성 검토", "민간투자법 적용 가능성 검토"];
-  } else if (ownerTypes.includes("LOCAL_GOVERNMENT")) {
-    governingRegime = "공유재산 및 물품 관리법 체계 검토";
-    candidateRoutes = ["행정재산 관리위탁 가능성 검토", "일반재산 위탁관리·위탁개발 가능성 검토", "민간투자법 적용 가능성 검토"];
-  } else if (ownerTypes.includes("PUBLIC_ENTITY")) {
-    governingRegime = "해당 공공기관 설립법·정관·자산관리규정 검토";
-    candidateRoutes = ["공공기관 자체개발", "민관 공동사업", "장기임대·사용수익 구조", "민간투자법 적용 가능성 검토"];
-  }
+  let governingRegime = "공공자산 관련 법령·기관 규정 확인";
+  if (ownerTypes.includes("STATE")) governingRegime = "국유재산법 체계 검토";
+  else if (ownerTypes.includes("LOCAL_GOVERNMENT")) governingRegime = "공유재산 및 물품 관리법 체계 검토";
+  else if (ownerTypes.includes("PUBLIC_ENTITY")) governingRegime = "해당 공공기관 설립법·정관·자산관리규정 검토";
+
+  const candidateRoutes = buildCandidateRoutes(ownerTypes, assetClass);
 
   return {
     inScope: true,
     readiness: "CONDITIONAL_REVIEW",
-    headline: "공공소유 확인 — 사업추진 구조 검토 가능",
+    headline: "공공소유 확인 — 재산구분 확인 후 사업구조 판정",
     summary:
-      "공공소유는 확인되었습니다. 관리주체, 재산구분, 현재 사용상태 및 의사결정권자를 확인한 뒤 실제 사업추진 방식과 PPP 적합성을 판정합니다.",
+      "공공소유는 확인되었습니다. 행정재산/일반재산 구분을 먼저 확인하고, 관리주체·현재 사용상태·의사결정권자를 반영해 가능한 사업추진 방식과 PPP 적합성을 판정합니다.",
     governingRegime,
     ownerClasses,
     ownerTypes,
+    assetClass,
+    assetClassBasis,
     gates: [
       { key: "OWNERSHIP", label: "공공소유 여부", status: "PASS", detail: ownerClasses.join(", ") },
-      { key: "MANAGER", label: "관리주체", status: "REVIEW", detail: "재산관리관·관리부서 별도 확인 필요" },
-      { key: "ASSET_CLASS", label: "재산구분", status: "REVIEW", detail: "행정재산 / 일반재산 등 확인 필요" },
-      { key: "CURRENT_USE", label: "현재 사용상태", status: "REVIEW", detail: "직접사용·유휴·임대·사용허가·점유 여부 확인 필요" },
-      { key: "DECISION_AUTHORITY", label: "사업 의사결정권자", status: "REVIEW", detail: "관리·처분·개발 권한자 확인 필요" },
-      { key: "DELIVERY", label: "사업추진 방식", status: "REVIEW", detail: "상기 확인 결과에 따라 PPP/위탁개발 등 구조 판정" },
+      { key: "MANAGER", label: "관리주체", status: "REVIEW", detail: "소유권자와 별도로 재산관리관·관리권자·운영주체 확인 필요" },
+      {
+        key: "ASSET_CLASS",
+        label: "재산구분 GATE",
+        status: "REVIEW",
+        detail: "행정재산 / 일반재산 공식 구분 확인 필요 — 확인 전 일반재산 위탁개발 등 상호 배타적 사업방식은 후보에서 제외",
+      },
+      { key: "CURRENT_USE", label: "현재 사용상태", status: "REVIEW", detail: "공원·주차장·청사 등 공공기능 및 직접사용·유휴·임대·사용허가·점유 여부 확인 필요" },
+      { key: "DECISION_AUTHORITY", label: "사업 의사결정권자", status: "REVIEW", detail: "관리권자와 별도로 관리·처분·개발 의사결정 권한자 확인 필요" },
+      { key: "DELIVERY", label: "사업추진 방식", status: "REVIEW", detail: "재산구분 GATE 통과 후 PPP·관리위탁·위탁개발·사용수익 등 구조 판정" },
     ],
     candidateRoutes,
     unresolved: [
       "실제 소유기관 명칭",
-      "재산관리관·관리부서",
-      "행정재산/일반재산 구분",
-      "현재 사용·점유 상태",
+      "재산관리관·관리권자·운영주체",
+      "행정재산/일반재산 공식 구분",
+      "현재 공공기능 및 사용·점유 상태",
       "관리·처분·개발 의사결정권자",
     ],
   };
