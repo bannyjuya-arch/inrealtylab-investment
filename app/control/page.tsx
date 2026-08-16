@@ -11,6 +11,8 @@ type Gate = {
   detail: string;
 };
 
+type AssetClassStatus = "ADMINISTRATIVE" | "GENERAL" | "UNKNOWN";
+
 type OwnershipRecord = {
   pnu: string;
   legalDong: string;
@@ -29,23 +31,27 @@ type OwnershipRecord = {
   dataDate: string | null;
 };
 
+type OwnershipAssessment = {
+  inScope: boolean;
+  readiness: string;
+  headline: string;
+  summary: string;
+  governingRegime?: string;
+  ownerClasses: string[];
+  ownerTypes: string[];
+  assetClass?: AssetClassStatus;
+  assetClassBasis?: string;
+  gates: Gate[];
+  candidateRoutes: string[];
+  unresolved: string[];
+};
+
 type OwnershipResponse = {
   ok: boolean;
   message?: string;
   pnu?: string;
   records?: OwnershipRecord[];
-  assessment?: {
-    inScope: boolean;
-    readiness: string;
-    headline: string;
-    summary: string;
-    governingRegime?: string;
-    ownerClasses: string[];
-    ownerTypes: string[];
-    gates: Gate[];
-    candidateRoutes: string[];
-    unresolved: string[];
-  };
+  assessment?: OwnershipAssessment;
   source?: {
     name: string;
     endpoint: string;
@@ -165,9 +171,44 @@ export default function ControlPage() {
     };
   }, [parcelResults, failures.length, assessments]);
 
-  const gates = successful.find((item) => item.result.assessment?.inScope)?.result.assessment?.gates ?? [];
+  const primaryAssessment = successful.find((item) => item.result.assessment?.inScope)?.result.assessment;
+  const gates = primaryAssessment?.gates ?? [];
   const candidateRoutes = unique(successful.flatMap((item) => item.result.assessment?.candidateRoutes ?? []));
   const unresolved = unique(successful.flatMap((item) => item.result.assessment?.unresolved ?? []));
+  const ownerTypeLabels = unique(successful.flatMap((item) => item.result.records?.map((record) => record.ownerTypeLabel) ?? []));
+  const ownerClasses = unique(successful.flatMap((item) => item.result.assessment?.ownerClasses ?? []));
+
+  const projectDirection = useMemo(() => {
+    const assetClass = primaryAssessment?.assetClass ?? "UNKNOWN";
+
+    if (assetClass === "ADMINISTRATIVE") {
+      return {
+        status: "조건부 추진 가능",
+        tone: "conditional",
+        priority: "기존 공공기능 유지형 복합화·관리위탁·사용허가 구조 우선 검토",
+        excluded: "일반재산 위탁개발",
+        prerequisites: ["관리권자 확인", "현재 공공기능 유지조건 확인", "사업 의사결정권자 확인", "필요 시 용도변경·용도폐지 가능성 검토"],
+      };
+    }
+
+    if (assetClass === "GENERAL") {
+      return {
+        status: "조건부 추진 가능",
+        tone: "conditional",
+        priority: "일반재산 위탁개발·대부·사용수익 기반 사업구조 우선 검토",
+        excluded: "행정재산 전용 관리위탁 구조",
+        prerequisites: ["관리권자 확인", "현재 사용·점유 상태 확인", "사업 의사결정권자 확인", "대부·개발 관련 내부절차 확인"],
+      };
+    }
+
+    return {
+      status: "추가 확인 필요",
+      tone: "review",
+      priority: "재산구분 확인 후 사업구조 판정",
+      excluded: "일반재산 위탁개발 확정 판단",
+      prerequisites: ["행정재산 / 일반재산 확인", "관리권자 확인", "현재 공공기능 확인", "사업 의사결정권자 확인"],
+    };
+  }, [primaryAssessment?.assetClass]);
 
   return (
     <main className="control-shell">
@@ -278,6 +319,52 @@ export default function ControlPage() {
               <section className="control-section">
                 <div className="control-section-title"><span>NEXT DATA</span><strong>추가 확인 필요정보</strong></div>
                 <ul className="unresolved-list">{unresolved.map((item) => <li key={item}>{item}</li>)}</ul>
+              </section>
+
+              <section className="project-direction-card">
+                <div className="control-section-title">
+                  <span>PROJECT DIRECTION</span>
+                  <strong>사업추진 방향</strong>
+                </div>
+
+                <div className="direction-status-row">
+                  <div>
+                    <span>현재 판정</span>
+                    <strong>{projectDirection.status}</strong>
+                  </div>
+                  <span className={`direction-badge ${projectDirection.tone}`}>{projectDirection.status}</span>
+                </div>
+
+                <div className="direction-grid">
+                  <div className="direction-block">
+                    <span>현재 확인</span>
+                    <ul>
+                      <li><strong>공공소유</strong><b>PASS</b></li>
+                      <li><strong>소유유형</strong><b>{ownerTypeLabels.join(", ") || "확인 필요"}</b></li>
+                      <li><strong>소유구분</strong><b>{ownerClasses.join(", ") || "확인 필요"}</b></li>
+                    </ul>
+                  </div>
+
+                  <div className="direction-block">
+                    <span>핵심 선결조건</span>
+                    <ul className="direction-prerequisites">
+                      {projectDirection.prerequisites.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="direction-decision-grid">
+                  <div className="direction-decision primary">
+                    <span>현재 우선 검토 방향</span>
+                    <strong>{projectDirection.priority}</strong>
+                  </div>
+                  <div className="direction-decision excluded">
+                    <span>현재 제외</span>
+                    <strong>{projectDirection.excluded}</strong>
+                  </div>
+                </div>
+
+                <p className="direction-note">재산구분·관리권자·현재 공공기능·의사결정권자 정보가 추가되면 이 판정은 자동으로 갱신됩니다.</p>
               </section>
             </>
           )}
