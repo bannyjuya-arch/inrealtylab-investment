@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const LAND_OWNERSHIP_URL =
-  "https://apis.data.go.kr/1611000/nsdi/PossessionService/attr/getPossessionAttr";
+const LAND_OWNERSHIP_URLS = [
+  "https://apis.data.go.kr/1611000/nsdi/PossessionService/attr/getPossessionAttr",
+  "http://apis.data.go.kr/1611000/nsdi/PossessionService/attr/getPossessionAttr",
+];
 
 type RawOwnership = Record<string, unknown>;
 
@@ -162,6 +164,47 @@ function assess(records: ReturnType<typeof normalizeRecord>[]) {
   };
 }
 
+function safeUpstreamText(raw: string, key: string) {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (!compact) return "응답 본문 없음";
+
+  const encodedKey = encodeURIComponent(key);
+  return compact
+    .replaceAll(key, "[SERVICE_KEY]")
+    .replaceAll(encodedKey, "[SERVICE_KEY]")
+    .slice(0, 300);
+}
+
+async function requestOwnership(params: URLSearchParams, key: string) {
+  let lastStatus = 0;
+  let lastRaw = "";
+
+  for (const baseUrl of LAND_OWNERSHIP_URLS) {
+    try {
+      const response = await fetch(`${baseUrl}?${params.toString()}`, {
+        cache: "no-store",
+        redirect: "follow",
+      });
+      const raw = await response.text();
+
+      if (response.ok) {
+        return { ok: true as const, raw, protocol: baseUrl.startsWith("https:") ? "https" : "http" };
+      }
+
+      lastStatus = response.status;
+      lastRaw = raw;
+    } catch (error) {
+      lastRaw = error instanceof Error ? error.message : "네트워크 오류";
+    }
+  }
+
+  return {
+    ok: false as const,
+    status: lastStatus,
+    detail: safeUpstreamText(lastRaw, key),
+  };
+}
+
 export async function GET(request: NextRequest) {
   const pnu = request.nextUrl.searchParams.get("pnu")?.trim() ?? "";
   if (!/^\d{19}$/.test(pnu)) {
@@ -182,26 +225,31 @@ export async function GET(request: NextRequest) {
 
   const params = new URLSearchParams({
     serviceKey: key,
-    numOfRows: "99999",
+    numOfRows: "100",
     pageNo: "1",
     format: "json",
     pnu,
   });
 
   try {
-    const response = await fetch(`${LAND_OWNERSHIP_URL}?${params.toString()}`, { cache: "no-store" });
-    const raw = await response.text();
-
-    if (!response.ok) {
-      return NextResponse.json({ ok: false, message: `토지소유정보 호출 실패 (HTTP ${response.status})` }, { status: 502 });
+    const upstream = await requestOwnership(params, key);
+    if (!upstream.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "OWNERSHIP_UPSTREAM_ERROR",
+          message: `토지소유정보 호출 실패${upstream.status ? ` (HTTP ${upstream.status})` : ""}: ${upstream.detail}`,
+        },
+        { status: 502 }
+      );
     }
 
     let payload: any;
     try {
-      payload = JSON.parse(raw);
+      payload = JSON.parse(upstream.raw);
     } catch {
       return NextResponse.json(
-        { ok: false, message: `토지소유정보 응답 파싱 실패: ${raw.replace(/\s+/g, " ").slice(0, 180)}` },
+        { ok: false, message: `토지소유정보 응답 파싱 실패: ${safeUpstreamText(upstream.raw, key)}` },
         { status: 502 }
       );
     }
@@ -211,6 +259,7 @@ export async function GET(request: NextRequest) {
       const upstreamMessage =
         payload?.response?.header?.resultMsg ??
         payload?.OpenAPI_ServiceResponse?.cmmMsgHeader?.errMsg ??
+        payload?.cmmMsgHeader?.errMsg ??
         "토지소유정보 API 응답 형식이 예상과 다릅니다. 활용신청/인증키 상태를 확인해 주세요.";
       return NextResponse.json({ ok: false, message: upstreamMessage }, { status: 502 });
     }
@@ -227,6 +276,7 @@ export async function GET(request: NextRequest) {
       source: {
         name: "국토교통부 토지소유정보",
         endpoint: "PossessionService/attr/getPossessionAttr",
+        protocol: upstream.protocol,
         queriedAt: new Date().toISOString(),
         totalCount: Number(possessions.totalCount) || records.length,
       },
