@@ -20,6 +20,23 @@ function compactText(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function decodeXmlEntities(value: string) {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+function extractServiceException(text: string) {
+  const codeMatch = text.match(/<ServiceException[^>]*code=["']([^"']+)["'][^>]*>/i);
+  const messageMatch = text.match(/<ServiceException[^>]*>([\s\S]*?)<\/ServiceException>/i);
+  const code = codeMatch?.[1]?.trim() ?? "UNKNOWN";
+  const message = decodeXmlEntities(compactText(messageMatch?.[1] ?? ""));
+  return { code, message };
+}
+
 export async function GET(req: NextRequest) {
   const lon = Number(req.nextUrl.searchParams.get("lon"));
   const lat = Number(req.nextUrl.searchParams.get("lat"));
@@ -36,9 +53,6 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // VWorld's official cadastral attribute-query sample uses WFS GetFeature
-  // against lt_c_landinfobasemap. We re-test that exact flow now that the
-  // Vercel Function runs in Seoul (icn1), which removed the prior gateway issue.
   const delta = 0.00002;
   const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join(",");
 
@@ -61,6 +75,25 @@ export async function GET(req: NextRequest) {
     });
 
     const text = await response.text();
+    const isXmlException = /<ServiceExceptionReport\b/i.test(text);
+
+    if (isXmlException) {
+      const serviceError = extractServiceException(text);
+      const suffix = serviceError.message ? ` · ${serviceError.message}` : "";
+      return NextResponse.json(
+        {
+          ok: false,
+          code: `VWORLD_SERVICE_EXCEPTION_${serviceError.code}`,
+          message: `VWorld WFS ServiceException [${serviceError.code}]${suffix}`,
+          detail: {
+            serviceExceptionCode: serviceError.code,
+            serviceExceptionMessage: serviceError.message,
+          },
+        },
+        { status: 502 }
+      );
+    }
+
     if (!response.ok) {
       const contentType = response.headers.get("content-type") ?? "unknown-content-type";
       const body = compactText(text).slice(0, 220) || "응답 본문 없음";
