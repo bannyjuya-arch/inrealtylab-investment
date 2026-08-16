@@ -1,25 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const LAND_OWNERSHIP_URLS = [
-  "https://apis.data.go.kr/1611000/nsdi/PossessionService/attr/getPossessionAttr",
-  "http://apis.data.go.kr/1611000/nsdi/PossessionService/attr/getPossessionAttr",
-];
+const LAND_OWNERSHIP_URL = "https://api.vworld.kr/ned/data/getPossessionAttr";
 
 type RawOwnership = Record<string, unknown>;
-
-function serviceKey() {
-  const raw =
-    process.env.MOLIT_LANDOWNERSHIP_API_KEY ??
-    process.env.MOLIT_LANDUSE_API_KEY ??
-    process.env.MOLIT_LANDLAW_API_KEY ??
-    "";
-  const trimmed = raw.trim();
-  try {
-    return decodeURIComponent(trimmed);
-  } catch {
-    return trimmed;
-  }
-}
 
 function asText(value: unknown) {
   return value === undefined || value === null ? "" : String(value).trim();
@@ -38,8 +21,10 @@ function classifyOwner(ownerClass: string) {
   if (
     value.includes("시도유") ||
     value.includes("시유") ||
+    value.includes("도유") ||
     value.includes("군유") ||
     value.includes("구유") ||
+    value.includes("공유") ||
     value.includes("지방자치")
   ) {
     return { sector: "PUBLIC", ownerType: "LOCAL_GOVERNMENT", label: "지방자치단체" } as const;
@@ -50,8 +35,14 @@ function classifyOwner(ownerClass: string) {
   if (value.includes("법인")) {
     return { sector: "PRIVATE", ownerType: "CORPORATION", label: "법인" } as const;
   }
-  if (value.includes("개인")) {
-    return { sector: "PRIVATE", ownerType: "INDIVIDUAL", label: "개인" } as const;
+  if (
+    value.includes("개인") ||
+    value.includes("사유") ||
+    value.includes("종중") ||
+    value.includes("종교") ||
+    value.includes("외국인")
+  ) {
+    return { sector: "PRIVATE", ownerType: "INDIVIDUAL", label: "민간" } as const;
   }
   return { sector: "UNKNOWN", ownerType: "UNKNOWN", label: ownerClass || "확인 필요" } as const;
 }
@@ -168,41 +159,49 @@ function safeUpstreamText(raw: string, key: string) {
   const compact = raw.replace(/\s+/g, " ").trim();
   if (!compact) return "응답 본문 없음";
 
-  const encodedKey = encodeURIComponent(key);
   return compact
-    .replaceAll(key, "[SERVICE_KEY]")
-    .replaceAll(encodedKey, "[SERVICE_KEY]")
-    .slice(0, 300);
+    .replaceAll(key, "[VWORLD_KEY]")
+    .replaceAll(encodeURIComponent(key), "[VWORLD_KEY]")
+    .slice(0, 400);
 }
 
-async function requestOwnership(params: URLSearchParams, key: string) {
-  let lastStatus = 0;
-  let lastRaw = "";
-
-  for (const baseUrl of LAND_OWNERSHIP_URLS) {
-    try {
-      const response = await fetch(`${baseUrl}?${params.toString()}`, {
-        cache: "no-store",
-        redirect: "follow",
-      });
-      const raw = await response.text();
-
-      if (response.ok) {
-        return { ok: true as const, raw, protocol: baseUrl.startsWith("https:") ? "https" : "http" };
-      }
-
-      lastStatus = response.status;
-      lastRaw = raw;
-    } catch (error) {
-      lastRaw = error instanceof Error ? error.message : "네트워크 오류";
-    }
+function collectOwnershipRecords(value: unknown, output: RawOwnership[] = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectOwnershipRecords(item, output));
+    return output;
   }
 
-  return {
-    ok: false as const,
-    status: lastStatus,
-    detail: safeUpstreamText(lastRaw, key),
-  };
+  if (!value || typeof value !== "object") return output;
+
+  const record = value as RawOwnership;
+  if (Object.prototype.hasOwnProperty.call(record, "posesnSeCodeNm")) {
+    output.push(record);
+  }
+
+  Object.values(record).forEach((child) => collectOwnershipRecords(child, output));
+  return output;
+}
+
+function findMessage(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findMessage(item);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["resultMsg", "errMsg", "returnAuthMsg", "message", "text"]) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  for (const child of Object.values(record)) {
+    const found = findMessage(child);
+    if (found) return found;
+  }
+  return null;
 }
 
 export async function GET(request: NextRequest) {
@@ -211,62 +210,71 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ ok: false, message: "19자리 PNU가 필요합니다." }, { status: 400 });
   }
 
-  const key = serviceKey();
-  if (!key) {
+  const key = process.env.VWORLD_API_KEY?.trim() ?? process.env.MOLIT_LANDOWNERSHIP_API_KEY?.trim() ?? "";
+  const domain = process.env.VWORLD_API_DOMAIN?.trim() ?? "";
+
+  if (!key || !domain) {
     return NextResponse.json(
       {
         ok: false,
-        code: "NO_SERVICE_KEY",
-        message: "토지소유정보 API 키가 없습니다. MOLIT_LANDOWNERSHIP_API_KEY를 Vercel 환경변수에 추가해 주세요.",
+        code: "NO_VWORLD_CONFIG",
+        message: "VWORLD_API_KEY 또는 VWORLD_API_DOMAIN 환경변수가 없습니다.",
       },
       { status: 503 }
     );
   }
 
   const params = new URLSearchParams({
-    serviceKey: key,
+    key,
+    domain,
+    pnu,
+    format: "json",
     numOfRows: "100",
     pageNo: "1",
-    format: "json",
-    pnu,
   });
 
   try {
-    const upstream = await requestOwnership(params, key);
-    if (!upstream.ok) {
+    const response = await fetch(`${LAND_OWNERSHIP_URL}?${params.toString()}`, {
+      cache: "no-store",
+      redirect: "follow",
+    });
+    const raw = await response.text();
+
+    if (!response.ok) {
       return NextResponse.json(
         {
           ok: false,
           code: "OWNERSHIP_UPSTREAM_ERROR",
-          message: `토지소유정보 호출 실패${upstream.status ? ` (HTTP ${upstream.status})` : ""}: ${upstream.detail}`,
+          message: `VWorld 토지소유정보 호출 실패 (HTTP ${response.status}): ${safeUpstreamText(raw, key)}`,
         },
         { status: 502 }
       );
     }
 
-    let payload: any;
+    let payload: unknown;
     try {
-      payload = JSON.parse(upstream.raw);
+      payload = JSON.parse(raw);
     } catch {
       return NextResponse.json(
-        { ok: false, message: `토지소유정보 응답 파싱 실패: ${safeUpstreamText(upstream.raw, key)}` },
+        { ok: false, message: `VWorld 토지소유정보 응답 파싱 실패: ${safeUpstreamText(raw, key)}` },
         { status: 502 }
       );
     }
 
-    const possessions = payload?.possessions;
-    if (!possessions) {
-      const upstreamMessage =
-        payload?.response?.header?.resultMsg ??
-        payload?.OpenAPI_ServiceResponse?.cmmMsgHeader?.errMsg ??
-        payload?.cmmMsgHeader?.errMsg ??
-        "토지소유정보 API 응답 형식이 예상과 다릅니다. 활용신청/인증키 상태를 확인해 주세요.";
-      return NextResponse.json({ ok: false, message: upstreamMessage }, { status: 502 });
+    const sourceRecords = collectOwnershipRecords(payload);
+    const deduped = [...new Map(sourceRecords.map((record) => [
+      [asText(record.pnu), asText(record.posesnSeCode), asText(record.cnrsPsnSn), asText(record.buldHoNm)].join("|"),
+      record,
+    ])).values()];
+
+    if (!deduped.length) {
+      const upstreamMessage = findMessage(payload);
+      if (upstreamMessage) {
+        return NextResponse.json({ ok: false, message: upstreamMessage }, { status: 502 });
+      }
     }
 
-    const fields = possessions.field;
-    const sourceRecords: RawOwnership[] = fields ? (Array.isArray(fields) ? fields : [fields]) : [];
-    const records = sourceRecords.map(normalizeRecord);
+    const records = deduped.map(normalizeRecord);
 
     return NextResponse.json({
       ok: true,
@@ -274,11 +282,10 @@ export async function GET(request: NextRequest) {
       records,
       assessment: assess(records),
       source: {
-        name: "국토교통부 토지소유정보",
-        endpoint: "PossessionService/attr/getPossessionAttr",
-        protocol: upstream.protocol,
+        name: "VWorld 국토정보 토지소유정보",
+        endpoint: "NED getPossessionAttr",
         queriedAt: new Date().toISOString(),
-        totalCount: Number(possessions.totalCount) || records.length,
+        totalCount: records.length,
       },
       privacy: {
         note: "개인 성명·주민등록번호·상세 거주지 등 개인정보는 수집·표시하지 않습니다.",
