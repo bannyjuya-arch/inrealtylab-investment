@@ -6,6 +6,61 @@ datasource db {
   provider = "postgresql"
 }
 
+enum RegulationDocumentStatus {
+  UPLOADED
+  EXTRACTED
+  REVIEW_REQUIRED
+  APPROVED
+  ACTIVE
+  SUPERSEDED
+  ARCHIVED
+  REFERENCE_ONLY
+}
+
+enum RegulationRuleStatus {
+  DRAFT
+  REVIEW_REQUIRED
+  APPROVED
+  ACTIVE
+  REJECTED
+  SUPERSEDED
+}
+
+enum RegulationRuleKind {
+  BCR_LIMIT
+  FAR_BASE
+  FAR_ALLOWED
+  FAR_MAX
+  FAR_INCENTIVE
+  FAR_FORMULA
+  USE_RESTRICTION
+  DISTRICT_PLAN
+  OVERLAY
+  TRANSITION
+  EXCEPTION
+  OTHER
+}
+
+enum RegulationValueType {
+  PERCENT
+  PERCENT_POINT
+  MULTIPLIER
+  FORMULA
+  BOOLEAN
+  TEXT
+  JSON
+}
+
+enum RegulationCombineMode {
+  OVERRIDE
+  ADD
+  MAX
+  MIN
+  EXCLUSIVE
+  FIRST_MATCH
+  MANUAL_REVIEW
+}
+
 model Project {
   id         String     @id @default(uuid())
   name       String
@@ -53,4 +108,97 @@ model ReportFile {
   createdAt   DateTime  @default(now())
 
   scenario    Scenario  @relation(fields: [scenarioId], references: [id], onDelete: Cascade)
+}
+
+model RegulationDocument {
+  id                 String                   @id @default(uuid())
+  documentGroupKey   String?
+  revision           Int                      @default(1)
+  title              String
+  issuer             String?
+  jurisdiction       String?
+  documentType       String?
+  documentNumber     String?
+  decisionDate       DateTime?
+  publishedAt        DateTime?
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  status             RegulationDocumentStatus @default(UPLOADED)
+  sourceFileName     String
+  sourceMimeType     String?
+  sourceStorageKey   String?
+  sourceHash         String?
+  sourceUrl          String?
+  extractionJson     Json?
+  extractionVersion  String?
+  extractedAt        DateTime?
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  approvedBy         String?
+  approvedAt         DateTime?
+  notes              String?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  rules              RegulationRule[]
+
+  @@index([jurisdiction, status])
+  @@index([documentGroupKey, revision])
+  @@index([decisionDate])
+}
+
+model RegulationRule {
+  id                 String                 @id @default(uuid())
+  documentId         String
+  ruleKey            String
+  version            Int                    @default(1)
+  name               String
+  kind               RegulationRuleKind
+  status             RegulationRuleStatus   @default(DRAFT)
+  jurisdiction       String?
+  scopeJson          Json
+  conditionJson      Json?
+  valueType          RegulationValueType
+  valueJson          Json
+  formula            String?
+  combineMode        RegulationCombineMode  @default(MANUAL_REVIEW)
+  priority           Int                    @default(100)
+  effectiveFrom      DateTime?
+  effectiveTo        DateTime?
+  transitionJson     Json?
+  sourceSection      String?
+  sourcePageStart    Int?
+  sourcePageEnd      Int?
+  sourceExcerpt      String?
+  confidence         Float?
+  reviewedBy         String?
+  reviewedAt         DateTime?
+  approvedBy         String?
+  approvedAt         DateTime?
+  notes              String?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  document           RegulationDocument     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  auditLogs           RegulationRuleAudit[]
+
+  @@unique([documentId, ruleKey, version])
+  @@index([jurisdiction, kind, status])
+  @@index([ruleKey, status])
+  @@index([effectiveFrom, effectiveTo])
+}
+
+model RegulationRuleAudit {
+  id          String          @id @default(uuid())
+  ruleId      String
+  action      String
+  actor       String?
+  beforeJson  Json?
+  afterJson   Json?
+  note        String?
+  createdAt   DateTime        @default(now())
+
+  rule        RegulationRule  @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, createdAt])
 }
