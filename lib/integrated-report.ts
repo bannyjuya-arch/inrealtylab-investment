@@ -9,14 +9,6 @@ export const DEVELOPMENT_SCENARIOS = [
 export const COMMERCIAL_CATEGORIES = [
   { key: "OFFICE", label: "OFFICE" },
   { key: "RETAIL", label: "RETAIL" },
-  { key: "HOSPITALITY", label: "HOSPITALITY" },
-  { key: "LIVING", label: "LIVING" },
-  { key: "HEALTHCARE", label: "HEALTHCARE" },
-  { key: "EDUCATION", label: "EDUCATION" },
-  { key: "CULTURE_ENTERTAINMENT", label: "CULTURE & ENTERTAINMENT" },
-  { key: "RND_LAB", label: "R&D / LAB" },
-  { key: "LOGISTICS", label: "LOGISTICS" },
-  { key: "DIGITAL_INFRA", label: "DIGITAL INFRA" },
 ] as const;
 
 export type CommercialCategoryKey = (typeof COMMERCIAL_CATEGORIES)[number]["key"];
