@@ -118,7 +118,7 @@ export default function SiteAnalyzer() {
   const selectedSourceRef = useRef<any>(null);
   const olRef = useRef<any>(null);
 
-  const [query, setQuery] = useState("서울특별시 성동구 행당동");
+  const [query, setQuery] = useState("");
   const [message, setMessage] = useState("지도에서 분석할 필지를 선택하세요.");
   const [loading, setLoading] = useState(false);
   const [cadastreVisible, setCadastreVisible] = useState(true);
@@ -264,10 +264,13 @@ export default function SiteAnalyzer() {
 
   useEffect(() => {
     if (!parcels.length) {
+      setQuery("");
       setRegulation(null);
       setRegulationError("");
       setActiveTab("SITE");
     } else {
+      const representative = parcels[0];
+      setQuery([representative.legalDong, representative.jibun].filter(Boolean).join(" "));
       setRegulation(null);
       setRegulationError("");
     }
