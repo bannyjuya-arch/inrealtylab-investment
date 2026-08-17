@@ -19,10 +19,63 @@ function readPnusFromSite() {
   return [...new Set(pnus)];
 }
 
+function numberFromText(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = Number(value.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function afterReactPaint() {
   return new Promise<void>((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
   });
+}
+
+async function waitForCapacity(timeoutMs = 7000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const cards = Array.from(document.querySelectorAll<HTMLElement>(".scenario-card"));
+    if (cards.length >= 3) return cards;
+    await new Promise((resolve) => setTimeout(resolve, 180));
+  }
+  return Array.from(document.querySelectorAll<HTMLElement>(".scenario-card"));
+}
+
+function readPart1Snapshot(pnus: string[]) {
+  const summaries = Array.from(document.querySelectorAll<HTMLElement>(".analysis-summary"));
+  const areaSummary = summaries.find((item) => item.querySelector("span")?.textContent?.trim() === "통합 대지면적");
+  const siteAreaSqm = numberFromText(areaSummary?.querySelector("strong")?.textContent);
+
+  const capacityBasis = document.querySelector<HTMLElement>(".capacity-basis");
+  const basisText = capacityBasis?.textContent ?? "";
+  const farMatch = basisText.match(/FAR\s*([0-9,.]+)%/i);
+  const bcrMatch = basisText.match(/BCR\s*([0-9,.]+)%/i);
+
+  const scenarios = Array.from(document.querySelectorAll<HTMLElement>(".scenario-card")).map((card) => {
+    const label = card.querySelector(".scenario-head strong")?.textContent?.trim() ?? "";
+    const rows = Array.from(card.querySelectorAll("dl > div"));
+    const valueOf = (key: string) => {
+      const row = rows.find((item) => item.querySelector("dt")?.textContent?.trim() === key);
+      return numberFromText(row?.querySelector("dd")?.textContent);
+    };
+    return {
+      label,
+      bcrPct: valueOf("건폐율"),
+      farPct: valueOf("용적률"),
+      footprintSqm: valueOf("건축면적"),
+      grossFloorAreaSqm: valueOf("연면적"),
+    };
+  });
+
+  return {
+    capturedAt: new Date().toISOString(),
+    pnus,
+    siteAreaSqm,
+    primaryZone: capacityBasis?.querySelector("strong")?.textContent?.trim() ?? null,
+    statutoryFarMaxPct: farMatch ? Number(farMatch[1].replace(/,/g, "")) : null,
+    statutoryBcrMaxPct: bcrMatch ? Number(bcrMatch[1].replace(/,/g, "")) : null,
+    scenarios,
+  };
 }
 
 export default function Part2Launcher() {
@@ -49,6 +102,20 @@ export default function Part2Launcher() {
       return;
     }
 
+    const capacityButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".analysis-tabs button"))
+      .find((button) => button.textContent?.trim() === "CAPACITY");
+
+    if (capacityButton && !capacityButton.disabled) {
+      capacityButton.click();
+      await waitForCapacity();
+    }
+
+    try {
+      sessionStorage.setItem("inrealtylab.part1Snapshot", JSON.stringify(readPart1Snapshot(uniquePnus)));
+    } catch {
+      // The analysis still continues if browser storage is unavailable.
+    }
+
     const params = new URLSearchParams({ pnus: uniquePnus.join(",") });
     window.location.href = `/control?${params.toString()}`;
   }
@@ -58,7 +125,7 @@ export default function Part2Launcher() {
       <div className="next-step-card">
         <span>PART 2</span>
         <strong>소유 · 사업추진 가능성 분석</strong>
-        <p>현재 선택된 필지의 PNU를 그대로 넘겨 공공소유 여부를 자동 확인합니다. SITE·REGULATION·CAPACITY 어느 탭에서도 실행할 수 있습니다.</p>
+        <p>현재 선택된 필지의 PNU와 Part 1 개발가능규모를 함께 넘겨 공공소유 여부와 후속 사업검토에 연결합니다.</p>
         <button type="button" onClick={openControl}>소유 · 사업추진 분석</button>
         {message && <div className="analysis-alert error" style={{ marginTop: 12 }}>{message}</div>}
       </div>
