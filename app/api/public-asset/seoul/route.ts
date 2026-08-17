@@ -11,29 +11,17 @@ function asText(value: unknown) {
 }
 
 function normalize(value: string) {
-  return value
-    .replace(/^서울특별시\s*/, "")
-    .replace(/\s+/g, "")
-    .replace(/[(),]/g, "")
-    .trim();
+  return value.replace(/^서울특별시\s*/, "").replace(/\s+/g, "").replace(/[(),]/g, "").trim();
 }
 
 function serviceKey() {
-  const raw = process.env.PUBLIC_DATA_API_KEY ?? "";
+  const raw = process.env.DATA_GO_KR_API_KEY ?? process.env.PUBLIC_DATA_API_KEY ?? "";
   const trimmed = raw.trim();
-  try {
-    return decodeURIComponent(trimmed);
-  } catch {
-    return trimmed;
-  }
+  try { return decodeURIComponent(trimmed); } catch { return trimmed; }
 }
 
 function safeText(raw: string, key: string) {
-  return raw
-    .replace(/\s+/g, " ")
-    .replaceAll(key, "[SERVICE_KEY]")
-    .replaceAll(encodeURIComponent(key), "[SERVICE_KEY]")
-    .slice(0, 350);
+  return raw.replace(/\s+/g, " ").replaceAll(key, "[SERVICE_KEY]").replaceAll(encodeURIComponent(key), "[SERVICE_KEY]").slice(0, 350);
 }
 
 function normalizeRow(row: SeoulAssetRow) {
@@ -52,32 +40,17 @@ export async function GET(request: NextRequest) {
   const jibun = request.nextUrl.searchParams.get("jibun")?.trim() ?? "";
 
   if (!legalDong.includes("서울") || !jibun) {
-    return NextResponse.json(
-      { ok: false, code: "NOT_SEOUL_OR_MISSING_ADDRESS", message: "서울 소재지와 지번이 필요합니다." },
-      { status: 400 }
-    );
+    return NextResponse.json({ ok: false, code: "NOT_SEOUL_OR_MISSING_ADDRESS", message: "서울 소재지와 지번이 필요합니다." }, { status: 400 });
   }
 
   const key = serviceKey();
   if (!key) {
-    return NextResponse.json(
-      {
-        ok: false,
-        code: "NO_PUBLIC_DATA_KEY",
-        message: "서울시 시유재산 조회용 PUBLIC_DATA_API_KEY가 Vercel에 설정되지 않았습니다.",
-      },
-      { status: 503 }
-    );
+    return NextResponse.json({ ok: false, code: "NO_PUBLIC_DATA_KEY", message: "서울시 시유재산 조회용 DATA_GO_KR_API_KEY가 Vercel에 설정되지 않았습니다." }, { status: 503 });
   }
 
   const dong = legalDong.split(/\s+/).filter(Boolean).at(-1) ?? "";
   const searchTerm = `${dong} ${jibun}`.trim();
-  const params = new URLSearchParams({
-    page: "1",
-    perPage: "100",
-    serviceKey: key,
-    "cond[소재지::LIKE]": searchTerm,
-  });
+  const params = new URLSearchParams({ page: "1", perPage: "100", serviceKey: key, "cond[소재지::LIKE]": searchTerm });
 
   try {
     const response = await fetch(`${SEOUL_ASSET_URL}?${params.toString()}`, { cache: "no-store" });
@@ -85,27 +58,18 @@ export async function GET(request: NextRequest) {
 
     if (!response.ok) {
       const invalidKey = response.status === 401 || /등록되지 않은 인증키|인증키/i.test(raw);
-      return NextResponse.json(
-        {
-          ok: false,
-          code: invalidKey ? "SEOUL_ASSET_INVALID_PUBLIC_DATA_KEY" : "SEOUL_ASSET_UPSTREAM_ERROR",
-          message: invalidKey
-            ? "PUBLIC_DATA_API_KEY가 공공데이터포털에서 유효하지 않습니다. 공공데이터포털의 일반 인증키를 확인해 주세요."
-            : `서울시 시유재산 조회 실패 (HTTP ${response.status}): ${safeText(raw, key)}`,
-        },
-        { status: 502 }
-      );
+      return NextResponse.json({
+        ok: false,
+        code: invalidKey ? "SEOUL_ASSET_INVALID_PUBLIC_DATA_KEY" : "SEOUL_ASSET_UPSTREAM_ERROR",
+        message: invalidKey
+          ? "DATA_GO_KR_API_KEY가 공공데이터포털에서 유효하지 않습니다. 공공데이터포털의 일반 인증키를 확인해 주세요."
+          : `서울시 시유재산 조회 실패 (HTTP ${response.status}): ${safeText(raw, key)}`,
+      }, { status: 502 });
     }
 
     let payload: any;
-    try {
-      payload = JSON.parse(raw);
-    } catch {
-      return NextResponse.json(
-        { ok: false, code: "SEOUL_ASSET_PARSE_ERROR", message: `서울시 시유재산 응답 파싱 실패: ${safeText(raw, key)}` },
-        { status: 502 }
-      );
-    }
+    try { payload = JSON.parse(raw); }
+    catch { return NextResponse.json({ ok: false, code: "SEOUL_ASSET_PARSE_ERROR", message: `서울시 시유재산 응답 파싱 실패: ${safeText(raw, key)}` }, { status: 502 }); }
 
     const rows = Array.isArray(payload?.data) ? payload.data.map(normalizeRow) : [];
     const target = normalize(`${legalDong} ${jibun}`);
@@ -113,7 +77,6 @@ export async function GET(request: NextRequest) {
       const location = normalize(row.location);
       return location.includes(normalize(`${dong}${jibun}`)) || target.includes(location) || location.includes(target);
     });
-
     const best = matched[0] ?? rows[0] ?? null;
 
     return NextResponse.json({
@@ -124,17 +87,9 @@ export async function GET(request: NextRequest) {
       matchCount: matched.length || rows.length,
       confidence: best ? (matched.length ? "ADDRESS_MATCH" : "SEARCH_CANDIDATE") : "NO_MATCH",
       freshness: "REFERENCE_REVERIFY",
-      source: {
-        name: "서울특별시 시유재산 현황",
-        provider: "서울특별시",
-        dataDate: SOURCE_DATA_DATE,
-        note: "1회성 공개자료이므로 현재 관리관·재산상태는 최신 확인이 필요합니다.",
-      },
+      source: { name: "서울특별시 시유재산 현황", provider: "서울특별시", dataDate: SOURCE_DATA_DATE, note: "1회성 공개자료이므로 현재 관리관·재산상태는 최신 확인이 필요합니다." },
     });
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, code: "SEOUL_ASSET_FETCH_ERROR", message: error instanceof Error ? error.message : "서울시 시유재산 조회 중 오류가 발생했습니다." },
-      { status: 502 }
-    );
+    return NextResponse.json({ ok: false, code: "SEOUL_ASSET_FETCH_ERROR", message: error instanceof Error ? error.message : "서울시 시유재산 조회 중 오류가 발생했습니다." }, { status: 502 });
   }
 }
