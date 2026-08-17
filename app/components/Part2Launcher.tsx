@@ -38,7 +38,7 @@ async function waitForCapacity(timeoutMs = 7000) {
     if (cards.length >= 3) return cards;
     await new Promise((resolve) => setTimeout(resolve, 180));
   }
-  return Array.from(document.querySelectorAll<HTMLElement>(".scenario-card"));
+  return Array.from(document.querySelectorAll<HTMLElement>>(".scenario-card"));
 }
 
 function readPart1Snapshot(pnus: string[]) {
@@ -110,13 +110,19 @@ export default function Part2Launcher() {
       await waitForCapacity();
     }
 
+    const snapshot = readPart1Snapshot(uniquePnus);
+    const serializedSnapshot = JSON.stringify(snapshot);
+
     try {
-      sessionStorage.setItem("inrealtylab.part1Snapshot", JSON.stringify(readPart1Snapshot(uniquePnus)));
+      sessionStorage.setItem("inrealtylab.part1Snapshot", serializedSnapshot);
     } catch {
       // The analysis still continues if browser storage is unavailable.
     }
 
-    const params = new URLSearchParams({ pnus: uniquePnus.join(",") });
+    const params = new URLSearchParams({
+      pnus: uniquePnus.join(","),
+      part1: serializedSnapshot,
+    });
     window.location.href = `/control?${params.toString()}`;
   }
 
