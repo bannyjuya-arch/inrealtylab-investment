@@ -38,7 +38,7 @@ async function waitForCapacity(timeoutMs = 7000) {
     if (cards.length >= 3) return cards;
     await new Promise((resolve) => setTimeout(resolve, 180));
   }
-  return Array.from(document.querySelectorAll<HTMLElement>>(".scenario-card"));
+  return Array.from(document.querySelectorAll<HTMLElement>(".scenario-card"));
 }
 
 function readPart1Snapshot(pnus: string[]) {
