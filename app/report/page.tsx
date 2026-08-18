@@ -43,6 +43,32 @@ type OwnershipResponse = {
 
 type OwnershipParcel = { pnu: string; result: OwnershipResponse };
 
+type LandPriceResponse = {
+  ok: boolean;
+  pnu?: string;
+  pricePerSqm?: number | null;
+  standardYear?: string | null;
+  message?: string;
+  source?: { name?: string; provider?: string; unit?: string };
+};
+
+type LandPriceParcel = { pnu: string; result: LandPriceResponse };
+
+type FloorSummary = {
+  basementAreaSqm: number;
+  aboveGroundAreaSqm: number;
+  basementRatioPct: number | null;
+};
+
+type FloorResponse = {
+  ok: boolean;
+  summary?: FloorSummary;
+  message?: string;
+  source?: { name?: string; endpoint?: string };
+};
+
+type FloorParcel = { pnu: string; result: FloorResponse };
+
 const emptyDemand: DemandInputs = {
   publicRequiredGfa: null,
   commercialSupportableGfa: Object.fromEntries(
@@ -84,9 +110,25 @@ function statusTone(value: string) {
   return "review";
 }
 
+function parsePnuForBuildingHub(pnu: string) {
+  if (!/^\d{19}$/.test(pnu)) return null;
+  const landFlag = pnu.slice(10, 11);
+  const platGbCd = landFlag === "2" ? "1" : "0";
+  return {
+    sigunguCd: pnu.slice(0, 5),
+    bjdongCd: pnu.slice(5, 10),
+    platGbCd,
+    bun: pnu.slice(11, 15),
+    ji: pnu.slice(15, 19),
+  };
+}
+
 export default function ReportPage() {
   const [snapshot, setSnapshot] = useState<Part1Snapshot>({});
   const [ownership, setOwnership] = useState<OwnershipParcel[]>([]);
+  const [landPrices, setLandPrices] = useState<LandPriceParcel[]>([]);
+  const [floorData, setFloorData] = useState<FloorParcel[]>([]);
+  const [basementAutoApplied, setBasementAutoApplied] = useState(false);
   const [demand, setDemand] = useState<DemandInputs>(emptyDemand);
   const [assumptions, setAssumptions] = useState<FinancialAssumptions>(initialAssumptions);
 
@@ -99,12 +141,13 @@ export default function ReportPage() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    const pnus = (params.get("pnus") ?? params.get("pnu") ?? "")
+    const pnus = [...new Set((params.get("pnus") ?? params.get("pnu") ?? "")
       .split(",")
       .map((item) => item.trim())
-      .filter((item) => /^\d{19}$/.test(item));
+      .filter((item) => /^\d{19}$/.test(item)))];
 
     if (!pnus.length) return;
+
     Promise.all(
       pnus.map(async (pnu) => {
         try {
@@ -115,15 +158,98 @@ export default function ReportPage() {
         }
       })
     ).then(setOwnership);
+
+    Promise.all(
+      pnus.map(async (pnu) => {
+        try {
+          const response = await fetch(`/api/land-price?pnu=${encodeURIComponent(pnu)}`, { cache: "no-store" });
+          return { pnu, result: (await response.json()) as LandPriceResponse };
+        } catch (error) {
+          return { pnu, result: { ok: false, message: error instanceof Error ? error.message : "개별공시지가 조회 실패" } };
+        }
+      })
+    ).then(setLandPrices);
+
+    Promise.all(
+      pnus.map(async (pnu) => {
+        const parsed = parsePnuForBuildingHub(pnu);
+        if (!parsed) return { pnu, result: { ok: false, message: "PNU 해석 실패" } as FloorResponse };
+        const query = new URLSearchParams(parsed);
+        try {
+          const response = await fetch(`/api/building-hub/floors?${query.toString()}`, { cache: "no-store" });
+          return { pnu, result: (await response.json()) as FloorResponse };
+        } catch (error) {
+          return { pnu, result: { ok: false, message: error instanceof Error ? error.message : "건축HUB 층별 조회 실패" } };
+        }
+      })
+    ).then(setFloorData);
   }, []);
 
   const records = useMemo(() => ownership.flatMap((item) => item.result.records ?? []), [ownership]);
   const siteAreaSqm = snapshot.siteAreaSqm ?? (records.length ? records.reduce((sum, row) => sum + (row.areaSqm ?? 0), 0) : null);
+
+  const landPriceByPnu = useMemo(() => new Map(
+    landPrices
+      .filter((item) => item.result.ok && item.result.pricePerSqm !== null && item.result.pricePerSqm !== undefined)
+      .map((item) => [item.pnu, item.result.pricePerSqm as number])
+  ), [landPrices]);
+
+  const landPriceYears = useMemo(() => [...new Set(
+    landPrices.map((item) => item.result.standardYear).filter((value): value is string => Boolean(value))
+  )], [landPrices]);
+
   const officialLandValue = useMemo(() => {
-    const usable = records.filter((row) => row.areaSqm !== null && row.officialLandPrice !== null);
-    if (!usable.length) return null;
-    return usable.reduce((sum, row) => sum + (row.areaSqm ?? 0) * (row.officialLandPrice ?? 0), 0);
-  }, [records]);
+    if (!landPriceByPnu.size) {
+      const usable = records.filter((row) => row.areaSqm !== null && row.officialLandPrice !== null);
+      if (!usable.length) return null;
+      const unique = new Map<string, OwnershipRecord>();
+      for (const row of usable) if (!unique.has(row.pnu)) unique.set(row.pnu, row);
+      return [...unique.values()].reduce((sum, row) => sum + (row.areaSqm ?? 0) * (row.officialLandPrice ?? 0), 0);
+    }
+
+    const areaByPnu = new Map<string, number>();
+    for (const row of records) {
+      if (row.areaSqm !== null && row.areaSqm > 0 && !areaByPnu.has(row.pnu)) areaByPnu.set(row.pnu, row.areaSqm);
+    }
+
+    if (landPriceByPnu.size === 1 && siteAreaSqm !== null) {
+      const price = [...landPriceByPnu.values()][0];
+      return siteAreaSqm * price;
+    }
+
+    let total = 0;
+    let matched = 0;
+    for (const [pnu, price] of landPriceByPnu) {
+      const area = areaByPnu.get(pnu);
+      if (area === undefined) continue;
+      total += area * price;
+      matched += 1;
+    }
+    return matched ? total : null;
+  }, [landPriceByPnu, records, siteAreaSqm]);
+
+  const basementReference = useMemo(() => {
+    const valid = floorData
+      .map((item) => item.result.summary)
+      .filter((summary): summary is FloorSummary => Boolean(summary && summary.aboveGroundAreaSqm > 0 && summary.basementRatioPct !== null));
+    if (!valid.length) return null;
+    const above = valid.reduce((sum, item) => sum + item.aboveGroundAreaSqm, 0);
+    const below = valid.reduce((sum, item) => sum + item.basementAreaSqm, 0);
+    return {
+      ratioPct: above > 0 ? (below / above) * 100 : null,
+      basementAreaSqm: below,
+      aboveGroundAreaSqm: above,
+      sampleCount: valid.length,
+    };
+  }, [floorData]);
+
+  useEffect(() => {
+    if (basementAutoApplied || assumptions.basementRatioPct !== null || basementReference?.ratioPct === null || basementReference?.ratioPct === undefined) return;
+    setAssumptions((current) => current.basementRatioPct === null
+      ? { ...current, basementRatioPct: Number(basementReference.ratioPct?.toFixed(2)) }
+      : current);
+    setBasementAutoApplied(true);
+  }, [basementAutoApplied, assumptions.basementRatioPct, basementReference]);
 
   const analysis = useMemo(() => buildIntegratedAnalysis({
     siteAreaSqm,
@@ -167,6 +293,7 @@ export default function ReportPage() {
 
   function setAssumption(key: keyof FinancialAssumptions, value: string | number) {
     const numeric = typeof value === "number" ? value : parseNumber(value);
+    if (key === "basementRatioPct") setBasementAutoApplied(true);
     setAssumptions((current) => ({ ...current, [key]: numeric }));
   }
 
@@ -195,8 +322,11 @@ export default function ReportPage() {
             <Metric label="용도지역" value={snapshot.primaryZone ?? "확인 필요"} />
             <Metric label="건폐율 상한" value={formatPercent(snapshot.statutoryBcrMaxPct ?? null)} />
             <Metric label="용적률 상한" value={formatPercent(snapshot.statutoryFarMaxPct ?? null)} />
-            <Metric label="공시지가 기준 토지가치" value={formatWon(officialLandValue)} />
+            <Metric label={`공시지가 기준 토지가치${landPriceYears.length ? ` (${landPriceYears.join("/")}년)` : ""}`} value={formatWon(officialLandValue)} />
             <Metric label="연 토지사용료 1%" value={formatWon(analysis.annualLandFee)} />
+            <div className="report-source" style={{ marginTop: 8 }}>
+              {landPriceByPnu.size ? "국토교통부 개별공시지가정보 자동조회" : "공시지가 자동조회값 없음 — 확인 필요"}
+            </div>
           </div>
         </div>
         <div className="report-section"><div className="report-section-head"><div><span>PART 1</span><br /><strong>개발가능 규모</strong></div></div>
@@ -205,6 +335,11 @@ export default function ReportPage() {
             <tr><td className="left">지하 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.undergroundGfa)}</td>)}</tr>
             <tr><td className="left">총 공사 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.totalConstructionGfa)}</td>)}</tr>
           </tbody></table>
+          <div className="report-note" style={{ marginTop: 10 }}>
+            {basementReference?.ratioPct !== null && basementReference?.ratioPct !== undefined
+              ? `지하 GFA는 건축HUB 층별개요의 기존 건축물 참고비율 ${basementReference.ratioPct.toFixed(1)}%를 초기값으로 적용했습니다. 미래 계획 지하규모의 확정값이 아니며 직접 수정할 수 있습니다.`
+              : "건축HUB에서 유효한 지상·지하 층별 면적을 찾지 못해 지하 비율은 자동 추정하지 않았습니다."}
+          </div>
         </div>
         <div className="report-section no-print"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
           <div className="report-form-grid">
