@@ -4,12 +4,33 @@ const BASE = "https://apis.data.go.kr/1613000/arLandUseInfoService";
 
 type XmlRow = Record<string, string>;
 type Decision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
+type Group = "OFFICE" | "RETAIL" | "PUBLIC";
 
 type FacilitySpec = {
   key: string;
   label: string;
-  group: "OFFICE" | "RETAIL" | "PUBLIC";
+  group: Group;
   keywords: string[];
+};
+
+type Evidence = {
+  activityName: string;
+  decisionRaw: string;
+  condition: string | null;
+  legalBasis: string | null;
+  confidence: number;
+};
+
+type FacilityResult = {
+  key: string;
+  label: string;
+  group: Group;
+  decision: Decision;
+  reason: string;
+  confidence: number;
+  activityCode: string | null;
+  activityName: string | null;
+  evidence: Evidence[];
 };
 
 const FACILITIES: FacilitySpec[] = [
@@ -25,13 +46,17 @@ const FACILITIES: FacilitySpec[] = [
   { key: "SPORTS", label: "운동시설", group: "PUBLIC", keywords: ["운동시설", "체육관"] },
 ];
 
-function serviceKey() {
+function serviceKey(): string {
   const raw = process.env.DATA_GO_KR_API_KEY ?? process.env.PUBLIC_DATA_API_KEY ?? "";
   const trimmed = raw.trim();
-  try { return decodeURIComponent(trimmed); } catch { return trimmed; }
+  try {
+    return decodeURIComponent(trimmed);
+  } catch {
+    return trimmed;
+  }
 }
 
-function decodeXml(value: string) {
+function decodeXml(value: string): string {
   return value
     .replace(/<!\[CDATA\[|\]\]>/g, "")
     .replace(/&lt;/g, "<")
@@ -43,79 +68,86 @@ function decodeXml(value: string) {
 }
 
 function parseItems(xml: string): XmlRow[] {
-  const chunks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)].map((match) => match[1]);
-  return chunks.map((chunk) => {
+  const result: XmlRow[] = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/gi;
+  let itemMatch: RegExpExecArray | null;
+
+  while ((itemMatch = itemRegex.exec(xml)) !== null) {
+    const chunk = itemMatch[1] ?? "";
     const row: XmlRow = {};
-    for (const match of chunk.matchAll(/<([A-Za-z0-9_]+)>([\s\S]*?)<\/\1>/g)) {
-      row[match[1]] = decodeXml(match[2]);
+    const fieldRegex = /<([A-Za-z0-9_]+)>([\s\S]*?)<\/\1>/g;
+    let fieldMatch: RegExpExecArray | null;
+
+    while ((fieldMatch = fieldRegex.exec(chunk)) !== null) {
+      const key = fieldMatch[1] ?? "";
+      const value = fieldMatch[2] ?? "";
+      if (key) row[key] = decodeXml(value);
     }
-    return row;
-  });
+    result.push(row);
+  }
+  return result;
 }
 
-function compact(value: string) {
+function compact(value: string): string {
   return value.replace(/\s+/g, "").replace(/[·ㆍ,()]/g, "").trim();
 }
 
-function rowText(row: XmlRow) {
+function rowText(row: XmlRow): string {
   return Object.values(row).filter(Boolean).join(" ");
 }
 
-function pick(row: XmlRow, keys: string[]) {
+function pick(row: XmlRow, keys: string[]): string {
   for (const key of keys) {
     const direct = row[key];
-    if (direct?.trim()) return direct.trim();
-    const found = Object.entries(row).find(([name, value]) => name.toLowerCase() === key.toLowerCase() && value?.trim());
-    if (found) return found[1].trim();
+    if (direct && direct.trim()) return direct.trim();
+    for (const [name, value] of Object.entries(row)) {
+      if (name.toLowerCase() === key.toLowerCase() && value.trim()) return value.trim();
+    }
   }
   return "";
 }
 
-function extractActivityCode(row: XmlRow) {
+function activityCode(row: XmlRow): string {
   return pick(row, ["lunCd", "LUN_CD", "lun_code", "luncd", "actCd", "ACT_CD", "actCode", "lndUseActCd"]);
 }
 
-function extractActivityName(row: XmlRow) {
+function activityName(row: XmlRow): string {
   return pick(row, ["lunNm", "luname", "lunName", "actNm", "actName", "lndUseActNm", "name"]) || rowText(row).slice(0, 240);
 }
 
-function scoreFacility(row: XmlRow, facility: FacilitySpec) {
-  const hay = compact(rowText(row));
-  return facility.keywords.reduce((score, keyword) => score + (hay.includes(compact(keyword)) ? compact(keyword).length : 0), 0);
+function scoreFacility(row: XmlRow, facility: FacilitySpec): number {
+  const text = compact(rowText(row));
+  let score = 0;
+  for (const keyword of facility.keywords) {
+    const normalized = compact(keyword);
+    if (text.includes(normalized)) score += normalized.length;
+  }
+  return score;
 }
 
 function inferDecision(row: XmlRow): { decision: Decision; confidence: number; raw: string } {
-  const raw = pick(row, [
-    "prmisnAt", "posblAt", "prmisnYn", "useAt", "result", "allowYn", "permitYn",
-    "limitCn", "reglCn", "contents", "lawCn", "detailCn", "cn",
-  ]) || rowText(row);
+  const raw = pick(row, ["prmisnAt", "posblAt", "prmisnYn", "useAt", "result", "allowYn", "permitYn", "limitCn", "reglCn", "contents", "lawCn", "detailCn", "cn"]) || rowText(row);
   const text = raw.replace(/\s+/g, " ");
 
-  if (/(불가|불허|금지|허용하지\s*않|할\s*수\s*없|건축할\s*수\s*없)/.test(text)) {
-    return { decision: "PROHIBITED", confidence: 0.95, raw };
-  }
-  if (/(조건|심의|허가|협의|승인|위원회|조례|별표|제한|예외|경우에\s*한)/.test(text)) {
-    return { decision: "CONDITIONAL", confidence: 0.78, raw };
-  }
-  if (/(가능|허용|할\s*수\s*있|건축할\s*수\s*있|허용함)/.test(text)) {
-    return { decision: "ALLOWED", confidence: 0.9, raw };
-  }
+  if (/(불가|불허|금지|허용하지\s*않|할\s*수\s*없|건축할\s*수\s*없)/.test(text)) return { decision: "PROHIBITED", confidence: 0.95, raw };
+  if (/(조건|심의|허가|협의|승인|위원회|조례|별표|제한|예외|경우에\s*한)/.test(text)) return { decision: "CONDITIONAL", confidence: 0.78, raw };
+  if (/(가능|허용|할\s*수\s*있|건축할\s*수\s*있|허용함)/.test(text)) return { decision: "ALLOWED", confidence: 0.9, raw };
   return { decision: "REVIEW", confidence: 0.4, raw };
 }
 
-function decisionRank(decision: Decision) {
-  return { PROHIBITED: 4, CONDITIONAL: 3, ALLOWED: 2, REVIEW: 1 }[decision];
+function decisionRank(decision: Decision): number {
+  if (decision === "PROHIBITED") return 4;
+  if (decision === "CONDITIONAL") return 3;
+  if (decision === "ALLOWED") return 2;
+  return 1;
 }
 
-async function callApi(path: "DTsearchLunCd" | "DTarLandUseInfo", params: Record<string, string>, key: string) {
+async function callApi(path: "DTsearchLunCd" | "DTarLandUseInfo", params: Record<string, string>, key: string): Promise<XmlRow[]> {
   const query = new URLSearchParams({ ...params, serviceKey: key });
   if (!query.has("numOfRows")) query.set("numOfRows", "1000");
   if (!query.has("pageNo")) query.set("pageNo", "1");
 
-  const response = await fetch(`${BASE}/${path}?${query.toString()}`, {
-    cache: "no-store",
-    headers: { Accept: "application/xml,text/xml,*/*" },
-  });
+  const response = await fetch(`${BASE}/${path}?${query.toString()}`, { cache: "no-store", headers: { Accept: "application/xml,text/xml,*/*" } });
   const raw = await response.text();
   if (!response.ok) throw new Error(`${path} HTTP ${response.status}`);
   if (/<resultCode>(?:20|30|31)<\/resultCode>/i.test(raw) || /SERVICE_(?:ACCESS_DENIED|KEY_IS_NOT_REGISTERED|KEY_IS_NULL)/i.test(raw)) {
@@ -124,15 +156,8 @@ async function callApi(path: "DTsearchLunCd" | "DTarLandUseInfo", params: Record
   return parseItems(raw);
 }
 
-async function loadActivityCatalog(key: string) {
-  const attempts: Record<string, string>[] = [
-    {},
-    { searchKeyword: "시설" },
-    { keyword: "시설" },
-    { lunNm: "시설" },
-    { luname: "시설" },
-  ];
-
+async function loadActivityCatalog(key: string): Promise<XmlRow[]> {
+  const attempts: Record<string, string>[] = [{}, { searchKeyword: "시설" }, { keyword: "시설" }, { lunNm: "시설" }, { luname: "시설" }];
   let best: XmlRow[] = [];
   for (const params of attempts) {
     try {
@@ -140,28 +165,84 @@ async function loadActivityCatalog(key: string) {
       if (rows.length > best.length) best = rows;
       if (rows.length >= 20) break;
     } catch {
-      // Different revisions of this legacy API have exposed slightly different search parameter names.
+      // legacy endpoint parameter variants
     }
   }
   return best;
 }
 
-function matchZoneRows(rows: XmlRow[], zoneName: string) {
-  if (!zoneName) return rows;
-  const target = compact(zoneName);
-  const matched = rows.filter((row) => compact(rowText(row)).includes(target));
-  return matched.length ? matched : rows;
-}
+async function analyzeFacility(facility: FacilitySpec, catalog: XmlRow[], sigunguCode: string, zoneName: string, key: string): Promise<FacilityResult> {
+  let selectedRow: XmlRow | null = null;
+  let selectedCode = "";
+  let bestScore = 0;
 
-function evidenceFrom(row: XmlRow, inferred: ReturnType<typeof inferDecision>) {
-  const condition = pick(row, ["limitCn", "reglCn", "condition", "cnstrCn", "detailCn", "contents", "cn"]);
-  const legalBasis = pick(row, ["lawNm", "lawCn", "lawArticle", "ordinanceCn", "relateLaw", "lawName"]);
-  return {
-    activityName: extractActivityName(row),
+  for (const row of catalog) {
+    const code = activityCode(row);
+    const score = scoreFacility(row, facility);
+    if (code && score > bestScore) {
+      bestScore = score;
+      selectedRow = row;
+      selectedCode = code;
+    }
+  }
+
+  if (!selectedRow || !selectedCode) {
+    return { key: facility.key, label: facility.label, group: facility.group, decision: "REVIEW", reason: "토지이용행위 코드 자동 매칭 결과가 없어 추가 확인이 필요합니다.", confidence: 0.25, activityCode: null, activityName: null, evidence: [] };
+  }
+
+  let rows: XmlRow[] = [];
+  const attempts: Record<string, string>[] = [
+    { sigunguCd: sigunguCode, lunCd: selectedCode },
+    { sigunguCode, lunCd: selectedCode },
+    { sigunguCd: sigunguCode, luncd: selectedCode },
+  ];
+  for (const params of attempts) {
+    try {
+      rows = await callApi("DTarLandUseInfo", params, key);
+      if (rows.length) break;
+    } catch {
+      // compatibility spelling fallback
+    }
+  }
+
+  let relevantRows = rows;
+  if (zoneName && rows.length) {
+    const target = compact(zoneName);
+    const matched = rows.filter((row) => compact(rowText(row)).includes(target));
+    if (matched.length) relevantRows = matched;
+  }
+
+  if (!relevantRows.length) {
+    return { key: facility.key, label: facility.label, group: facility.group, decision: "REVIEW", reason: "해당 시군구·행위 조합의 행위제한 응답을 확인하지 못했습니다.", confidence: 0.3, activityCode: selectedCode, activityName: activityName(selectedRow), evidence: [] };
+  }
+
+  const interpreted = relevantRows.map((row) => ({ row, inferred: inferDecision(row) }));
+  interpreted.sort((a, b) => decisionRank(b.inferred.decision) - decisionRank(a.inferred.decision));
+  const strongest = interpreted[0];
+  if (!strongest) {
+    return { key: facility.key, label: facility.label, group: facility.group, decision: "REVIEW", reason: "판정 가능한 응답이 없습니다.", confidence: 0.2, activityCode: selectedCode, activityName: activityName(selectedRow), evidence: [] };
+  }
+
+  const zoneMatched = zoneName ? relevantRows.some((row) => compact(rowText(row)).includes(compact(zoneName))) : false;
+  const confidence = Math.max(0.2, Math.min(0.98, strongest.inferred.confidence * (zoneName && !zoneMatched ? 0.75 : 1)));
+  const evidence: Evidence[] = interpreted.slice(0, 3).map(({ row, inferred }) => ({
+    activityName: activityName(row),
     decisionRaw: inferred.raw.slice(0, 1200),
-    condition: condition || null,
-    legalBasis: legalBasis || null,
+    condition: pick(row, ["limitCn", "reglCn", "condition", "cnstrCn", "detailCn", "contents", "cn"]) || null,
+    legalBasis: pick(row, ["lawNm", "lawCn", "lawArticle", "ordinanceCn", "relateLaw", "lawName"]) || null,
     confidence: inferred.confidence,
+  }));
+
+  return {
+    key: facility.key,
+    label: facility.label,
+    group: facility.group,
+    decision: strongest.inferred.decision,
+    reason: strongest.inferred.raw.slice(0, 600) || "행위제한 원문 확인 필요",
+    confidence,
+    activityCode: selectedCode,
+    activityName: activityName(selectedRow),
+    evidence,
   };
 }
 
@@ -170,97 +251,24 @@ export async function GET(request: NextRequest) {
   const zoneName = request.nextUrl.searchParams.get("zoneName")?.trim() ?? "";
   const key = serviceKey();
 
-  if (!/^\d{19}$/.test(pnu)) {
-    return NextResponse.json({ ok: false, message: "19자리 PNU가 필요합니다." }, { status: 400 });
-  }
-  if (!key) {
-    return NextResponse.json({ ok: false, code: "NO_PUBLIC_DATA_KEY", message: "DATA_GO_KR_API_KEY가 설정되지 않았습니다." }, { status: 503 });
-  }
+  if (!/^\d{19}$/.test(pnu)) return NextResponse.json({ ok: false, message: "19자리 PNU가 필요합니다." }, { status: 400 });
+  if (!key) return NextResponse.json({ ok: false, code: "NO_PUBLIC_DATA_KEY", message: "DATA_GO_KR_API_KEY가 설정되지 않았습니다." }, { status: 503 });
 
   const sigunguCode = pnu.slice(0, 5);
   const queriedAt = new Date().toISOString();
 
   try {
     const catalog = await loadActivityCatalog(key);
-
-    const facilities = await Promise.all(FACILITIES.map(async (facility) => {
-      const candidates = catalog
-        .map((row) => ({ row, score: scoreFacility(row, facility), code: extractActivityCode(row) }))
-        .filter((item) => item.score > 0 && item.code)
-        .sort((a, b) => b.score - a.score);
-
-      const selected = candidates[0];
-      if (!selected) {
-        return {
-          key: facility.key,
-          label: facility.label,
-          group: facility.group,
-          decision: "REVIEW" as Decision,
-          reason: "토지이용행위 코드 자동 매칭 결과가 없어 추가 확인이 필요합니다.",
-          confidence: 0.25,
-          activityCode: null,
-          activityName: null,
-          evidence: [],
-        };
-      }
-
-      let rows: XmlRow[] = [];
-      const restrictionAttempts = [
-        { sigunguCd: sigunguCode, lunCd: selected.code },
-        { sigunguCode, lunCd: selected.code },
-        { sigunguCd: sigunguCode, luncd: selected.code },
-      ];
-      for (const params of restrictionAttempts) {
-        try {
-          rows = await callApi("DTarLandUseInfo", params, key);
-          if (rows.length) break;
-        } catch {
-          // Try the next compatibility spelling.
-        }
-      }
-
-      const relevantRows = matchZoneRows(rows, zoneName);
-      if (!relevantRows.length) {
-        return {
-          key: facility.key,
-          label: facility.label,
-          group: facility.group,
-          decision: "REVIEW" as Decision,
-          reason: "해당 시군구·행위 조합의 행위제한 응답을 확인하지 못했습니다.",
-          confidence: 0.3,
-          activityCode: selected.code,
-          activityName: extractActivityName(selected.row),
-          evidence: [],
-        };
-      }
-
-      const interpreted = relevantRows.map((row) => ({ row, inferred: inferDecision(row) }));
-      interpreted.sort((a, b) => decisionRank(b.inferred.decision) - decisionRank(a.inferred.decision));
-      const strongest = interpreted[0];
-      const zoneMatched = zoneName ? relevantRows.some((row) => compact(rowText(row)).includes(compact(zoneName))) : false;
-      const confidence = Math.max(0.2, Math.min(0.98, strongest.inferred.confidence * (zoneName && !zoneMatched ? 0.75 : 1)));
-
-      return {
-        key: facility.key,
-        label: facility.label,
-        group: facility.group,
-        decision: strongest.inferred.decision,
-        reason: strongest.inferred.raw.slice(0, 600) || "행위제한 원문 확인 필요",
-        confidence,
-        activityCode: selected.code,
-        activityName: extractActivityName(selected.row),
-        evidence: interpreted.slice(0, 3).map(({ row, inferred }) => evidenceFrom(row, inferred)),
-      };
-    }));
+    const facilities: FacilityResult[] = [];
+    for (const facility of FACILITIES) {
+      facilities.push(await analyzeFacility(facility, catalog, sigunguCode, zoneName, key));
+    }
 
     return NextResponse.json({
       ok: true,
       query: { pnu, sigunguCode, zoneName },
       facilities,
-      diagnostics: {
-        activityCatalogCount: catalog.length,
-        matchedFacilityCount: facilities.filter((facility) => facility.activityCode).length,
-      },
+      diagnostics: { activityCatalogCount: catalog.length, matchedFacilityCount: facilities.filter((facility) => facility.activityCode !== null).length },
       source: {
         code: "MOLIT_LANDUSE_RESTRICTION",
         name: "국토교통부 토지이용규제정보서비스",
@@ -271,10 +279,6 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
-    return NextResponse.json({
-      ok: false,
-      code: "ALLOWED_USE_UPSTREAM_ERROR",
-      message: error instanceof Error ? error.message : "토지이용규제정보 조회 중 오류가 발생했습니다.",
-    }, { status: 502 });
+    return NextResponse.json({ ok: false, code: "ALLOWED_USE_UPSTREAM_ERROR", message: error instanceof Error ? error.message : "토지이용규제정보 조회 중 오류가 발생했습니다." }, { status: 502 });
   }
 }
