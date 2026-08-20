@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import BasementRatioBridge from "./basement-ratio-bridge";
 import FacilityAvailabilityBridge from "./facility-availability-bridge";
+import BusinessFacilityCostBridge from "./business-facility-cost-bridge";
 
 const bootstrapPart1 = `
 (function () {
@@ -51,6 +52,7 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
       <script dangerouslySetInnerHTML={{ __html: bootstrapPart1 }} />
       <BasementRatioBridge />
       <FacilityAvailabilityBridge />
+      <BusinessFacilityCostBridge />
       {children}
     </>
   );
