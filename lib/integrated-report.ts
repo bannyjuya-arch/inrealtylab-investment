@@ -7,8 +7,16 @@ export const DEVELOPMENT_SCENARIOS = [
 ] as const;
 
 export const COMMERCIAL_CATEGORIES = [
-  { key: "OFFICE", label: "OFFICE" },
-  { key: "RETAIL", label: "RETAIL" },
+  { key: "OFFICE", label: "오피스 (OFFICE)" },
+  { key: "RETAIL", label: "리테일 (RETAIL)" },
+  { key: "LOGISTICS_WAREHOUSE", label: "물류/창고 (LOGISTICS & WAREHOUSE)" },
+  { key: "RESIDENTIAL", label: "주거 (RESIDENTIAL)" },
+  { key: "HOSPITALITY", label: "숙박 (HOSPITALITY)" },
+  { key: "HEALTHCARE", label: "의료/헬스케어 (HEALTHCARE)" },
+  { key: "EDUCATION_RESEARCH", label: "교육/연구 (EDUCATION & RESEARCH)" },
+  { key: "INDUSTRIAL_MANUFACTURING", label: "산업/제조 (INDUSTRIAL & MANUFACTURING)" },
+  { key: "DATA_CENTER", label: "데이터센터 (DATA CENTER)" },
+  { key: "MIXED_USE", label: "복합용도 (MIXED-USE)" },
 ] as const;
 
 export type CommercialCategoryKey = (typeof COMMERCIAL_CATEGORIES)[number]["key"];
