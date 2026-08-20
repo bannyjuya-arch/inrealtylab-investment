@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import BasementRatioBridge from "./basement-ratio-bridge";
 
 const bootstrapPart1 = `
 (function () {
@@ -47,6 +48,7 @@ export default function ReportLayout({ children }: { children: ReactNode }) {
   return (
     <>
       <script dangerouslySetInnerHTML={{ __html: bootstrapPart1 }} />
+      <BasementRatioBridge />
       {children}
     </>
   );
