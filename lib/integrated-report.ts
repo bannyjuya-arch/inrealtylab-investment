@@ -187,7 +187,7 @@ export function buildIntegratedAnalysis(input: {
   const basementRatio = nonNegative(input.assumptions.basementRatioPct);
   const costPerSqm = nonNegative(input.assumptions.constructionCostPerSqm);
   const landValue = nonNegative(input.officialLandValue);
-  const annualLandFee = landValue === null ? null : landValue * 0.01;
+  const annualLandFee = landValue === null ? null : landValue * 0.05;
   const linkedPart1Scenarios = readLinkedPart1Scenarios();
 
   const capacities: ScenarioCapacity[] = DEVELOPMENT_SCENARIOS.map((scenario, index) => {
