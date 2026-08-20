@@ -4,7 +4,18 @@ const BASE = "https://apis.data.go.kr/1613000/arLandUseInfoService";
 
 type XmlRow = Record<string, string>;
 type Decision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
-type Group = "OFFICE" | "RETAIL" | "PUBLIC";
+type RevenueGroup =
+  | "OFFICE"
+  | "RETAIL"
+  | "LOGISTICS_WAREHOUSE"
+  | "RESIDENTIAL"
+  | "HOSPITALITY"
+  | "HEALTHCARE"
+  | "EDUCATION_RESEARCH"
+  | "INDUSTRIAL_MANUFACTURING"
+  | "DATA_CENTER"
+  | "MIXED_USE";
+type Group = RevenueGroup | "PUBLIC";
 
 type FacilitySpec = {
   key: string;
@@ -34,14 +45,20 @@ type FacilityResult = {
 };
 
 const FACILITIES: FacilitySpec[] = [
-  { key: "OFFICE_GENERAL", label: "업무시설", group: "OFFICE", keywords: ["업무시설", "일반업무시설", "사무소"] },
-  { key: "RETAIL", label: "판매시설", group: "RETAIL", keywords: ["판매시설", "소매점", "상점"] },
-  { key: "NEIGHBORHOOD_1", label: "제1종 근린생활시설", group: "RETAIL", keywords: ["제1종근린생활시설", "제1종 근린생활시설"] },
-  { key: "NEIGHBORHOOD_2", label: "제2종 근린생활시설", group: "RETAIL", keywords: ["제2종근린생활시설", "제2종 근린생활시설"] },
+  { key: "OFFICE_GENERAL", label: "오피스", group: "OFFICE", keywords: ["업무시설", "일반업무시설", "사무소"] },
+  { key: "RETAIL", label: "리테일", group: "RETAIL", keywords: ["판매시설", "소매점", "상점", "근린생활시설"] },
+  { key: "LOGISTICS_WAREHOUSE", label: "물류/창고", group: "LOGISTICS_WAREHOUSE", keywords: ["창고시설", "물류시설", "창고", "물류터미널"] },
+  { key: "RESIDENTIAL", label: "주거", group: "RESIDENTIAL", keywords: ["공동주택", "주택", "기숙사", "도시형생활주택"] },
+  { key: "HOSPITALITY", label: "숙박", group: "HOSPITALITY", keywords: ["숙박시설", "호텔", "관광숙박시설", "생활숙박시설"] },
+  { key: "HEALTHCARE", label: "의료/헬스케어", group: "HEALTHCARE", keywords: ["의료시설", "병원", "의원", "요양병원"] },
+  { key: "EDUCATION_RESEARCH", label: "교육/연구", group: "EDUCATION_RESEARCH", keywords: ["교육연구시설", "학교", "연구소", "학원"] },
+  { key: "INDUSTRIAL_MANUFACTURING", label: "산업/제조", group: "INDUSTRIAL_MANUFACTURING", keywords: ["공장", "산업시설", "제조시설", "지식산업센터"] },
+  { key: "DATA_CENTER", label: "데이터센터", group: "DATA_CENTER", keywords: ["데이터센터", "전산센터", "방송통신시설"] },
+  { key: "MIXED_USE", label: "복합용도", group: "MIXED_USE", keywords: ["복합시설", "주상복합", "복합건축물"] },
   { key: "PUBLIC_OFFICE", label: "공공업무시설", group: "PUBLIC", keywords: ["공공업무시설", "공공청사", "청사"] },
-  { key: "EDUCATION_RESEARCH", label: "교육연구시설", group: "PUBLIC", keywords: ["교육연구시설", "학교", "연구소"] },
+  { key: "PUBLIC_EDUCATION_RESEARCH", label: "교육연구시설", group: "PUBLIC", keywords: ["교육연구시설", "학교", "연구소"] },
   { key: "CULTURE_ASSEMBLY", label: "문화 및 집회시설", group: "PUBLIC", keywords: ["문화및집회시설", "문화 및 집회시설", "공연장", "집회장"] },
-  { key: "MEDICAL", label: "의료시설", group: "PUBLIC", keywords: ["의료시설", "병원"] },
+  { key: "PUBLIC_MEDICAL", label: "의료시설", group: "PUBLIC", keywords: ["의료시설", "병원"] },
   { key: "WELFARE", label: "노유자시설", group: "PUBLIC", keywords: ["노유자시설", "사회복지시설"] },
   { key: "SPORTS", label: "운동시설", group: "PUBLIC", keywords: ["운동시설", "체육관"] },
 ];
