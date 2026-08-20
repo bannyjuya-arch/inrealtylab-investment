@@ -4,7 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 type Decision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
-type Group = "OFFICE" | "RETAIL" | "PUBLIC";
+type RevenueGroup =
+  | "OFFICE"
+  | "RETAIL"
+  | "LOGISTICS_WAREHOUSE"
+  | "RESIDENTIAL"
+  | "HOSPITALITY"
+  | "HEALTHCARE"
+  | "EDUCATION_RESEARCH"
+  | "INDUSTRIAL_MANUFACTURING"
+  | "DATA_CENTER"
+  | "MIXED_USE";
+type Group = RevenueGroup | "PUBLIC";
 
 type FacilityResult = {
   key: string;
@@ -24,6 +35,19 @@ type AllowedUseResponse = {
 type AggregatedFacility = FacilityResult & {
   parcelCount: number;
 };
+
+const REVENUE_GROUPS: { key: RevenueGroup; label: string }[] = [
+  { key: "OFFICE", label: "오피스" },
+  { key: "RETAIL", label: "리테일" },
+  { key: "LOGISTICS_WAREHOUSE", label: "물류/창고" },
+  { key: "RESIDENTIAL", label: "주거" },
+  { key: "HOSPITALITY", label: "숙박" },
+  { key: "HEALTHCARE", label: "의료/헬스케어" },
+  { key: "EDUCATION_RESEARCH", label: "교육/연구" },
+  { key: "INDUSTRIAL_MANUFACTURING", label: "산업/제조" },
+  { key: "DATA_CENTER", label: "데이터센터" },
+  { key: "MIXED_USE", label: "복합용도" },
+];
 
 const decisionRank: Record<Decision, number> = {
   ALLOWED: 1,
@@ -92,40 +116,58 @@ function aggregateFacilities(results: FacilityResult[][]): AggregatedFacility[] 
   });
 }
 
-function FacilityGroup({ title, subtitle, facilities }: {
-  title: string;
-  subtitle: string;
-  facilities: AggregatedFacility[];
-}) {
-  const usable = facilities.filter((item) => item.decision === "ALLOWED" || item.decision === "CONDITIONAL");
-  const review = facilities.filter((item) => item.decision === "REVIEW");
-  const prohibited = facilities.filter((item) => item.decision === "PROHIBITED");
+function badgeTone(decision: Decision) {
+  if (decision === "ALLOWED") return "pass";
+  if (decision === "PROHIBITED") return "fail";
+  return "review";
+}
 
+function PublicFacilities({ facilities }: { facilities: AggregatedFacility[] }) {
+  const usable = facilities.filter((item) => item.decision === "ALLOWED" || item.decision === "CONDITIONAL");
   return (
     <div className="report-card" style={{ minHeight: 0 }}>
-      <h3 style={{ marginBottom: 4 }}>{title}</h3>
-      <div className="report-source" style={{ marginBottom: 12 }}>{subtitle}</div>
+      <h3 style={{ marginBottom: 4 }}>기본 수요시설</h3>
+      <div className="report-source" style={{ marginBottom: 12 }}>공공·필수 시설군</div>
       {usable.length ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {usable.map((facility) => (
-            <span
-              key={facility.key}
-              title={facility.reason || undefined}
-              className={`report-status ${facility.decision === "ALLOWED" ? "pass" : "review"}`}
-              style={{ display: "inline-flex", gap: 6, alignItems: "center" }}
-            >
+            <span key={facility.key} title={facility.reason || undefined} className={`report-status ${badgeTone(facility.decision)}`}>
               {facility.label} · {decisionLabel[facility.decision]}
             </span>
           ))}
         </div>
       ) : (
-        <div className="report-warning">현재 자동판정에서 즉시 사용 가능 또는 조건부 검토 시설이 확인되지 않았습니다.</div>
+        <div className="report-warning">현재 자동판정에서 사용 가능 또는 조건부 검토 기본 수요시설이 확인되지 않았습니다.</div>
       )}
-      {(review.length > 0 || prohibited.length > 0) && (
-        <div className="report-source" style={{ marginTop: 12, lineHeight: 1.6 }}>
-          추가 확인 {review.length}개 · 사용 불가 {prohibited.length}개
-        </div>
-      )}
+    </div>
+  );
+}
+
+function RevenueFacilities({ facilities }: { facilities: AggregatedFacility[] }) {
+  const byGroup = new Map<RevenueGroup, AggregatedFacility>();
+  for (const facility of facilities) {
+    if (facility.group === "PUBLIC") continue;
+    const group = facility.group as RevenueGroup;
+    const current = byGroup.get(group);
+    if (!current || decisionRank[facility.decision] > decisionRank[current.decision]) byGroup.set(group, facility);
+  }
+
+  return (
+    <div className="report-card" style={{ minHeight: 0 }}>
+      <h3 style={{ marginBottom: 4 }}>수익시설 10개 유형</h3>
+      <div className="report-source" style={{ marginBottom: 12 }}>Part 3 수익시설 분류 기준</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+        {REVENUE_GROUPS.map((group) => {
+          const facility = byGroup.get(group.key);
+          const decision: Decision = facility?.decision ?? "REVIEW";
+          return (
+            <div key={group.key} title={facility?.reason || "자동판정 근거 추가 확인 필요"} style={{ border: "1px solid #eaecf0", borderRadius: 10, padding: 10 }}>
+              <strong style={{ display: "block", marginBottom: 6 }}>{group.label}</strong>
+              <span className={`report-status ${badgeTone(decision)}`}>{decisionLabel[decision]}</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -207,7 +249,7 @@ export default function FacilityAvailabilityBridge() {
   }, []);
 
   const publicFacilities = useMemo(() => facilities.filter((item) => item.group === "PUBLIC"), [facilities]);
-  const revenueFacilities = useMemo(() => facilities.filter((item) => item.group === "OFFICE" || item.group === "RETAIL"), [facilities]);
+  const revenueFacilities = useMemo(() => facilities.filter((item) => item.group !== "PUBLIC"), [facilities]);
 
   if (!mount) return null;
 
@@ -225,16 +267,8 @@ export default function FacilityAvailabilityBridge() {
         <div className="report-warning">{error}</div>
       ) : (
         <div className="report-grid">
-          <FacilityGroup
-            title="기본 수요시설"
-            subtitle="공공·필수 시설군"
-            facilities={publicFacilities}
-          />
-          <FacilityGroup
-            title="수익시설"
-            subtitle="OFFICE · RETAIL"
-            facilities={revenueFacilities}
-          />
+          <PublicFacilities facilities={publicFacilities} />
+          <RevenueFacilities facilities={revenueFacilities} />
         </div>
       )}
     </>,
