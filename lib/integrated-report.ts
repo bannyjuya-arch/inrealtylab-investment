@@ -73,9 +73,26 @@ export type IntegratedAnalysis = {
   financialMatrix: FinancialCell[];
 };
 
+type LinkedPart1Scenario = {
+  label?: string | null;
+  grossFloorAreaSqm?: number | null;
+};
+
 function nonNegative(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
   return Math.max(0, value);
+}
+
+function readLinkedPart1Scenarios(): LinkedPart1Scenario[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.sessionStorage.getItem("inrealtylab.part1Snapshot");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { scenarios?: LinkedPart1Scenario[] };
+    return Array.isArray(parsed.scenarios) ? parsed.scenarios : [];
+  } catch {
+    return [];
+  }
 }
 
 function sumCommercial(values: DemandInputs["commercialSupportableGfa"]) {
@@ -163,11 +180,15 @@ export function buildIntegratedAnalysis(input: {
   const costPerSqm = nonNegative(input.assumptions.constructionCostPerSqm);
   const landValue = nonNegative(input.officialLandValue);
   const annualLandFee = landValue === null ? null : landValue * 0.01;
+  const linkedPart1Scenarios = readLinkedPart1Scenarios();
 
-  const capacities: ScenarioCapacity[] = DEVELOPMENT_SCENARIOS.map((scenario) => {
-    const aboveGroundGfa = siteArea !== null && farMax !== null
+  const capacities: ScenarioCapacity[] = DEVELOPMENT_SCENARIOS.map((scenario, index) => {
+    const linkedScenario = linkedPart1Scenarios[index];
+    const linkedAboveGroundGfa = nonNegative(linkedScenario?.grossFloorAreaSqm);
+    const fallbackAboveGroundGfa = siteArea !== null && farMax !== null
       ? siteArea * (farMax / 100) * scenario.factor
       : 0;
+    const aboveGroundGfa = linkedAboveGroundGfa ?? fallbackAboveGroundGfa;
     const undergroundGfa = basementRatio === null ? null : aboveGroundGfa * (basementRatio / 100);
     const totalConstructionGfa = undergroundGfa === null ? null : aboveGroundGfa + undergroundGfa;
     const demandGapGfa = fullDemandGfa === null ? null : aboveGroundGfa - fullDemandGfa;
@@ -189,7 +210,7 @@ export function buildIntegratedAnalysis(input: {
 
     return {
       key: scenario.key,
-      label: scenario.label,
+      label: linkedScenario?.label?.trim() || scenario.label,
       factor: scenario.factor,
       aboveGroundGfa,
       undergroundGfa,
