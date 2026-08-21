@@ -96,6 +96,40 @@ function readContext() {
   return { pnu, gfa };
 }
 
+function persistCommercialAllocation(
+  pnu: string,
+  commercialPoolGfaSqm: number | null,
+  rows: FacilityRow[],
+  complete: boolean,
+) {
+  try {
+    const facilities = rows.map((row) => {
+      const ratioPct = Number(row.ratio_pct || 0);
+      const allocatedGfaSqm = complete && commercialPoolGfaSqm != null
+        ? commercialPoolGfaSqm * ratioPct / 100
+        : null;
+      return {
+        facilityCode: row.facility_code,
+        categoryCode: row.category_code,
+        categoryName: row.category_name,
+        ratioPct,
+        allocatedGfaSqm,
+      };
+    });
+
+    sessionStorage.setItem("inrealtylab.commercialAllocation", JSON.stringify({
+      pnu,
+      scenarioCode: "BASE",
+      commercialPoolGfaSqm,
+      complete,
+      facilities,
+      savedAt: new Date().toISOString(),
+    }));
+  } catch {
+    // Continue if browser storage is unavailable.
+  }
+}
+
 export default function CommercialAllocationTable() {
   const [pnu, setPnu] = useState("");
   const [aboveGroundGfaSqm, setAboveGroundGfaSqm] = useState<number | null>(null);
@@ -170,9 +204,15 @@ export default function CommercialAllocationTable() {
           throw new Error(costResult.data?.message ?? "공사비 기준정보를 불러오지 못했습니다.");
         }
 
-        setRows(allocationResult.data.facilities ?? []);
+        const loadedRows = allocationResult.data.facilities ?? [];
+        const loadedPool = allocationResult.data.commercialPoolGfaSqm ?? null;
+        const loadedTotal = loadedRows.reduce((sum: number, row: FacilityRow) => sum + Number(row.ratio_pct || 0), 0);
+        const loadedComplete = allocationResult.data.allocationComplete ?? Math.abs(loadedTotal - 100) < 0.000001;
+
+        setRows(loadedRows);
         setScenario(allocationResult.data.scenario);
-        setCommercialPoolGfaSqm(allocationResult.data.commercialPoolGfaSqm ?? null);
+        setCommercialPoolGfaSqm(loadedPool);
+        persistCommercialAllocation(ctx.pnu, loadedPool, loadedRows, loadedComplete);
 
         const costMap: Record<string, CostRow> = {};
         const inputMap: Record<string, number> = {};
@@ -257,6 +297,7 @@ export default function CommercialAllocationTable() {
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data?.message ?? "저장에 실패했습니다.");
+      persistCommercialAllocation(pnu, commercialPoolGfaSqm, rows, complete);
       setMessage(complete ? "수익시설 면적배분이 100%로 확정되었습니다." : `저장되었습니다. 남은 비율 ${remaining.toFixed(1)}%를 배분해 주세요.`);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "저장 중 오류가 발생했습니다.");
