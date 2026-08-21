@@ -4,6 +4,9 @@ import { fetchPublicDataXml, publicDataServiceKey } from "../lib/public-data";
 const SUPPORTED = ["C01_OFFICE", "C02_RETAIL", "C04_LIVING"] as const;
 type FacilityCode = (typeof SUPPORTED)[number];
 
+const SEOUL_SUPABASE_URL = "https://igiltlrafwiszkhvtspb.supabase.co";
+const SEOUL_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_Gy4GhKbuZU9vV3hEoPQ5Og_5P4_5_9e";
+
 const LIVING_SOURCES = [
   {
     sourceCode: "RTMS_APT_RENT",
@@ -27,8 +30,11 @@ const LIVING_SOURCES = [
 
 function supabaseConfig() {
   return {
-    url: process.env.SUPABASE_URL?.replace(/\/$/, "") ?? "",
-    secret: process.env.SUPABASE_SECRET_KEY ?? "",
+    url: (process.env.SUPABASE_URL || SEOUL_SUPABASE_URL).replace(/\/$/, ""),
+    key:
+      process.env.SUPABASE_PUBLISHABLE_KEY ??
+      process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ??
+      SEOUL_SUPABASE_PUBLISHABLE_KEY,
   };
 }
 
@@ -53,8 +59,7 @@ function median(values: number[]) {
 }
 
 async function readBenchmark(facilityCode: FacilityCode, lawdCd?: string) {
-  const { url, secret } = supabaseConfig();
-  if (!url || !secret) throw new Error("Supabase 임대료 DB 연결 설정이 없습니다.");
+  const { url, key } = supabaseConfig();
 
   const query = new URLSearchParams({
     select: "facility_code,geography_type,geography_code,geography_name,submarket,rent_per_sqm_month,unit,source_kind,source_code,source_name,base_date,sample_count,methodology,confidence,raw_meta",
@@ -67,12 +72,15 @@ async function readBenchmark(facilityCode: FacilityCode, lawdCd?: string) {
   const response = await fetch(`${url}/rest/v1/part3_rent_benchmark?${query.toString()}`, {
     cache: "no-store",
     headers: {
-      apikey: secret,
-      Authorization: `Bearer ${secret}`,
+      apikey: key,
+      Authorization: `Bearer ${key}`,
       Accept: "application/json",
     },
   });
-  if (!response.ok) throw new Error(`임대료 DB 조회 실패 ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 300);
+    throw new Error(`임대료 DB 조회 실패 ${response.status}: ${detail}`);
+  }
   return response.json();
 }
 
@@ -83,42 +91,23 @@ async function upsertLivingBenchmark(input: {
   sampleCount: number;
   sourceBreakdown: Record<string, number>;
 }) {
-  const { url, secret } = supabaseConfig();
-  if (!url || !secret) throw new Error("Supabase 임대료 DB 연결 설정이 없습니다.");
-
+  const { url, key } = supabaseConfig();
   const baseDate = `${input.dealYmd.slice(0, 4)}-${input.dealYmd.slice(4, 6)}-01`;
-  const row = {
-    facility_code: "C04_LIVING",
-    geography_type: "SIGUNGU",
-    geography_code: input.lawdCd,
-    geography_name: null,
-    submarket: "ALL_LIVING",
-    rent_per_sqm_month: input.rentPerSqmMonth,
-    unit: "KRW/sqm/month",
-    source_kind: "ACTUAL_RENT_TRANSACTION",
-    source_code: "RTMS_LIVING_MONTHLY_RENT_MEDIAN",
-    source_name: "국토교통부 전월세 실거래가 통합",
-    source_url: "https://www.data.go.kr/",
-    base_date: baseDate,
-    sample_count: input.sampleCount,
-    methodology: "아파트·연립다세대·오피스텔 월세 실거래 중 월세>0, 전용면적>0 건의 월세/전용면적 중앙값. 보증금 환산은 미적용.",
-    confidence: input.sampleCount >= 30 ? 0.9 : input.sampleCount >= 10 ? 0.75 : 0.6,
-    raw_meta: { dealYmd: input.dealYmd, sourceBreakdown: input.sourceBreakdown },
-    updated_at: new Date().toISOString(),
-  };
 
-  const query = new URLSearchParams({
-    on_conflict: "facility_code,geography_code,submarket,source_code,base_date",
-  });
-  const response = await fetch(`${url}/rest/v1/part3_rent_benchmark?${query.toString()}`, {
+  const response = await fetch(`${url}/rest/v1/rpc/part3_upsert_living_rent_benchmark`, {
     method: "POST",
     headers: {
-      apikey: secret,
-      Authorization: `Bearer ${secret}`,
+      apikey: key,
+      Authorization: `Bearer ${key}`,
       "Content-Type": "application/json",
-      Prefer: "resolution=merge-duplicates,return=representation",
     },
-    body: JSON.stringify(row),
+    body: JSON.stringify({
+      p_geography_code: input.lawdCd,
+      p_base_date: baseDate,
+      p_rent_per_sqm_month: input.rentPerSqmMonth,
+      p_sample_count: input.sampleCount,
+      p_source_breakdown: input.sourceBreakdown,
+    }),
   });
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 300);
@@ -148,7 +137,7 @@ async function refreshLiving(lawdCd: string, dealYmd: string) {
       const area = parseNumber(pick(row, ["excluUseAr", "exclusiveArea", "area", "전용면적"]));
       if (monthlyRent === null || area === null || monthlyRent <= 0 || area <= 0) continue;
 
-      // RTMS monthlyRent is reported in 만원. Normalize to KRW/sqm/month.
+      // RTMS monthly rent is reported in 만원. Normalize to KRW/sqm/month.
       unitRents.push((monthlyRent * 10_000) / area);
       accepted += 1;
     }
