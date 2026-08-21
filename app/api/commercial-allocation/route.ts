@@ -1,23 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-  "https://igiltlrafwiszkhvtspb.supabase.co";
-
-const SUPABASE_PUBLISHABLE_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
-  "sb_publishable_Gy4GhKbuZU9vV3hEoPQ5Og_5P4_5_9e";
+import { supabasePublicConfig, supabasePublicHeaders } from "../lib/supabase-public";
 
 async function callEdge(body: Record<string, unknown>) {
-  const response = await fetch(`${SUPABASE_URL}/functions/v1/part3-commercial-allocation`, {
+  const { url } = supabasePublicConfig();
+  const response = await fetch(`${url}/functions/v1/part3-commercial-allocation`, {
     method: "POST",
     cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-    },
+    headers: supabasePublicHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
 
