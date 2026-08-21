@@ -56,7 +56,7 @@ type AllowedUseDecision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
 type AllowedUseFacility = {
   key: string;
   label: string;
-  group: "OFFICE" | "RETAIL" | "PUBLIC";
+  group: string;
   decision: AllowedUseDecision;
   reason: string;
   confidence: number;
@@ -474,11 +474,17 @@ export default function SiteAnalyzer() {
       }
 
       const zoneName = currentRegulation.primaryZone ?? currentRegulation.useZones[0]?.name ?? "";
+      const legalGfa = currentRegulation.statutoryLimit
+        ? totalArea * (currentRegulation.statutoryLimit.farMax / 100)
+        : null;
+      const gfaParam = legalGfa && legalGfa > 0
+        ? `&aboveGroundGfaSqm=${encodeURIComponent(legalGfa)}`
+        : "";
       const response = await fetch(
-        `/api/allowed-use?pnu=${encodeURIComponent(parcels[0].pnu)}&zoneName=${encodeURIComponent(zoneName)}`
+        `/api/allowed-use?pnu=${encodeURIComponent(parcels[0].pnu)}&zoneName=${encodeURIComponent(zoneName)}&scenarioCode=BASE${gfaParam}`
       );
       const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data?.message ?? "건축 가능시설 조회에 실패했습니다.");
+      if (!response.ok || !data.ok) throw new Error(data?.message ?? data?.error ?? "건축 가능시설 조회에 실패했습니다.");
       setAllowedUse({
         facilities: data.facilities ?? [],
         diagnostics: data.diagnostics,
@@ -666,6 +672,7 @@ export default function SiteAnalyzer() {
 
                   <AllowedUseGroup title="업무시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "OFFICE")} />
                   <AllowedUseGroup title="판매·근린생활시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "RETAIL")} />
+                  <AllowedUseGroup title="기타 수익시설" facilities={allowedUse.facilities.filter((facility) => !["OFFICE", "RETAIL", "PUBLIC"].includes(facility.group))} />
                   <AllowedUseGroup title="공공·필수시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "PUBLIC")} />
 
                   <div className="source-note">
