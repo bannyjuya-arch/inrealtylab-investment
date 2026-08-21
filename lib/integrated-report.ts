@@ -57,6 +57,18 @@ export type ScenarioCapacity = {
   totalProjectCost: number | null;
 };
 
+export type FacilityOperatingLine = {
+  facilityCode: string;
+  ratioPct: number;
+  allocatedGfaSqm: number;
+  revenueAreaSqm: number;
+  monthlyRentPerSqm: number;
+  occupancyRate: number;
+  annualRevenue: number;
+  opexPct: number;
+  annualOpex: number;
+};
+
 export type FinancialCell = {
   scenarioKey: DevelopmentScenarioKey;
   scenarioLabel: string;
@@ -72,6 +84,7 @@ export type FinancialCell = {
   projectIrr: number | null;
   reitsStatus: "FAIL" | "PASS" | "REVIEW";
   investorReturnSatisfied: boolean | null;
+  facilityOperatingLines: FacilityOperatingLine[];
 };
 
 export type IntegratedAnalysis = {
@@ -87,11 +100,33 @@ type LinkedPart1Scenario = {
   grossFloorAreaSqm?: number | null;
 };
 
+type CommercialAllocationSnapshot = {
+  complete?: boolean;
+  facilities?: Array<{
+    facilityCode?: string;
+    ratioPct?: number;
+  }>;
+};
+
 const TOTAL_PROJECT_COST_FACTOR = 1.2;
+const DEFAULT_PF_RATE_PCT = 7.0;
 const DEFAULT_LTC_PCT = 75;
 const MIN_LTC_PCT = 70;
 const MAX_LTC_PCT = 80;
-const FIXED_OCCUPANCY_RATE = 0.95;
+const LEASE_OCCUPANCY_RATE = 0.95;
+
+const FACILITY_REVENUE_POLICY: Record<string, { efficiency: number; opexPct: number; leaseBased: boolean }> = {
+  C01_OFFICE: { efficiency: 0.5245, opexPct: 36, leaseBased: true },
+  C02_RETAIL: { efficiency: 0.80, opexPct: 30, leaseBased: true },
+  C03_HOSPITALITY: { efficiency: 0.5631067961, opexPct: 30, leaseBased: false },
+  C04_LIVING: { efficiency: 0.70, opexPct: 30, leaseBased: true },
+  C05_HEALTHCARE: { efficiency: 0.4938271605, opexPct: 30, leaseBased: false },
+  C06_EDUCATION: { efficiency: 0.7018, opexPct: 30, leaseBased: false },
+  C07_CULTURE_ENTERTAINMENT: { efficiency: 0.75, opexPct: 30, leaseBased: false },
+  C08_RND_LAB: { efficiency: 0.5714285714, opexPct: 30, leaseBased: false },
+  C09_LOGISTICS: { efficiency: 1.0, opexPct: 30, leaseBased: false },
+  C10_DIGITAL_INFRA: { efficiency: 0.1733333333, opexPct: 30, leaseBased: false },
+};
 
 function nonNegative(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
@@ -110,16 +145,40 @@ function readLinkedPart1Scenarios(): LinkedPart1Scenario[] {
   }
 }
 
-function readSelectedPfRatePct() {
+function readCommercialAllocation(): CommercialAllocationSnapshot | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem("inrealtylab.pfRatePct");
+    const raw = window.sessionStorage.getItem("inrealtylab.commercialAllocation");
     if (!raw) return null;
-    const value = Number(raw);
-    if (!Number.isFinite(value)) return null;
-    return Math.min(9, Math.max(5, value));
+    const parsed = JSON.parse(raw) as CommercialAllocationSnapshot;
+    return parsed && Array.isArray(parsed.facilities) ? parsed : null;
   } catch {
     return null;
+  }
+}
+
+function readFacilityRent(facilityCode: string) {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = window.sessionStorage.getItem(`inrealtylab.rent.${facilityCode}`);
+    if (raw === null) return 0;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function readSelectedPfRatePct() {
+  if (typeof window === "undefined") return DEFAULT_PF_RATE_PCT;
+  try {
+    const raw = window.sessionStorage.getItem("inrealtylab.pfRatePct");
+    if (!raw) return DEFAULT_PF_RATE_PCT;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return DEFAULT_PF_RATE_PCT;
+    return Math.min(9, Math.max(5, value));
+  } catch {
+    return DEFAULT_PF_RATE_PCT;
   }
 }
 
@@ -201,6 +260,36 @@ function classifyIrr(irr: number | null): FinancialCell["reitsStatus"] {
   return irr >= 0.06 ? "PASS" : "FAIL";
 }
 
+function buildFacilityOperatingLines(selectedCommercialGfa: number | null) {
+  if (selectedCommercialGfa === null) return null;
+  const allocation = readCommercialAllocation();
+  if (!allocation?.complete || !allocation.facilities?.length) return null;
+
+  return allocation.facilities.map((facility): FacilityOperatingLine => {
+    const facilityCode = String(facility.facilityCode ?? "");
+    const ratioPct = Math.max(0, Math.min(100, Number(facility.ratioPct ?? 0)));
+    const allocatedGfaSqm = selectedCommercialGfa * ratioPct / 100;
+    const policy = FACILITY_REVENUE_POLICY[facilityCode] ?? { efficiency: 1, opexPct: 30, leaseBased: false };
+    const revenueAreaSqm = allocatedGfaSqm * policy.efficiency;
+    const monthlyRentPerSqm = readFacilityRent(facilityCode);
+    const occupancyRate = policy.leaseBased && monthlyRentPerSqm > 0 ? LEASE_OCCUPANCY_RATE : 1;
+    const annualRevenue = revenueAreaSqm * monthlyRentPerSqm * 12 * occupancyRate;
+    const annualOpex = annualRevenue * policy.opexPct / 100;
+
+    return {
+      facilityCode,
+      ratioPct,
+      allocatedGfaSqm,
+      revenueAreaSqm,
+      monthlyRentPerSqm,
+      occupancyRate,
+      annualRevenue,
+      opexPct: policy.opexPct,
+      annualOpex,
+    };
+  });
+}
+
 export function buildIntegratedAnalysis(input: {
   siteAreaSqm: number | null;
   farMaxPct: number | null;
@@ -265,9 +354,8 @@ export function buildIntegratedAnalysis(input: {
     };
   });
 
-  const monthlyRent = nonNegative(input.assumptions.monthlyRentPerSqm);
-  const occupancy = FIXED_OCCUPANCY_RATE;
-  const opexPct = nonNegative(input.assumptions.opexPct);
+  const legacyMonthlyRent = nonNegative(input.assumptions.monthlyRentPerSqm);
+  const legacyOpexPct = nonNegative(input.assumptions.opexPct);
   const referenceRate = nonNegative(input.assumptions.referenceRatePct);
   const pfSpread = nonNegative(input.assumptions.pfSpreadPct);
   const selectedPfRate = readSelectedPfRatePct();
@@ -276,10 +364,26 @@ export function buildIntegratedAnalysis(input: {
   const otherAnnualRevenue = nonNegative(input.assumptions.otherAnnualRevenue) ?? 0;
 
   const financialMatrix = capacities.flatMap((capacity) => CONCESSION_TERMS.map((term): FinancialCell => {
-    const annualRevenue = capacity.selectedCommercialGfa === null || monthlyRent === null
-      ? null
-      : capacity.selectedCommercialGfa * monthlyRent * 12 * occupancy + otherAnnualRevenue;
-    const annualOpex = annualRevenue === null || opexPct === null ? null : annualRevenue * (opexPct / 100);
+    const facilityOperatingLines = buildFacilityOperatingLines(capacity.selectedCommercialGfa);
+    const facilityAnnualRevenue = facilityOperatingLines
+      ? facilityOperatingLines.reduce((sum, item) => sum + item.annualRevenue, 0)
+      : null;
+    const facilityAnnualOpex = facilityOperatingLines
+      ? facilityOperatingLines.reduce((sum, item) => sum + item.annualOpex, 0)
+      : null;
+
+    const annualRevenue = facilityAnnualRevenue !== null
+      ? facilityAnnualRevenue + otherAnnualRevenue
+      : capacity.selectedCommercialGfa === null || legacyMonthlyRent === null
+        ? null
+        : capacity.selectedCommercialGfa * legacyMonthlyRent * 12 + otherAnnualRevenue;
+
+    const annualOpex = facilityAnnualOpex !== null
+      ? facilityAnnualOpex
+      : annualRevenue === null || legacyOpexPct === null
+        ? null
+        : annualRevenue * (legacyOpexPct / 100);
+
     const annualProjectCashflow = annualRevenue === null || annualOpex === null || annualLandFee === null
       ? null
       : annualRevenue - annualOpex - annualLandFee;
@@ -289,10 +393,9 @@ export function buildIntegratedAnalysis(input: {
       : capacity.totalProjectCost * (selectedLtcPct / 100);
     const appliedRatePct = selectedPfRate ?? (referenceRate === null || pfSpread === null ? null : referenceRate + pfSpread);
     const appliedRate = appliedRatePct === null ? null : appliedRatePct / 100;
-    const effectiveDebtTenor = term;
     const annualDebtService = debtAmount === null || appliedRate === null
       ? null
-      : annuityPayment(debtAmount, appliedRate, effectiveDebtTenor);
+      : annuityPayment(debtAmount, appliedRate, term);
     const dscr = annualProjectCashflow === null || annualDebtService === null || annualDebtService <= 0
       ? null
       : annualProjectCashflow / annualDebtService;
@@ -321,6 +424,7 @@ export function buildIntegratedAnalysis(input: {
       investorReturnSatisfied: projectIrr === null || investorRequiredReturn === null
         ? null
         : projectIrr >= investorRequiredReturn / 100,
+      facilityOperatingLines: facilityOperatingLines ?? [],
     };
   }));
 
