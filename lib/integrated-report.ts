@@ -103,6 +103,19 @@ function readLinkedPart1Scenarios(): LinkedPart1Scenario[] {
   }
 }
 
+function readSelectedPfRatePct() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem("inrealtylab.pfRatePct");
+    if (!raw) return null;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return null;
+    return Math.min(9, Math.max(5, value));
+  } catch {
+    return null;
+  }
+}
+
 function sumCommercial(values: DemandInputs["commercialSupportableGfa"]) {
   const numeric = COMMERCIAL_CATEGORIES
     .map((item) => nonNegative(values[item.key]))
@@ -236,6 +249,7 @@ export function buildIntegratedAnalysis(input: {
   const opexPct = nonNegative(input.assumptions.opexPct);
   const referenceRate = nonNegative(input.assumptions.referenceRatePct);
   const pfSpread = nonNegative(input.assumptions.pfSpreadPct);
+  const selectedPfRate = readSelectedPfRatePct();
   const debtRatio = nonNegative(input.assumptions.debtRatioPct);
   const debtTenor = nonNegative(input.assumptions.debtTenorYears);
   const investorRequiredReturn = nonNegative(input.assumptions.investorRequiredReturnPct);
@@ -253,7 +267,8 @@ export function buildIntegratedAnalysis(input: {
     const debtAmount = capacity.constructionCapex === null || debtRatio === null
       ? null
       : capacity.constructionCapex * (debtRatio / 100);
-    const appliedRate = referenceRate === null || pfSpread === null ? null : (referenceRate + pfSpread) / 100;
+    const appliedRatePct = selectedPfRate ?? (referenceRate === null || pfSpread === null ? null : referenceRate + pfSpread);
+    const appliedRate = appliedRatePct === null ? null : appliedRatePct / 100;
     const effectiveDebtTenor = debtTenor === null ? null : Math.max(1, Math.min(term, Math.round(debtTenor)));
     const annualDebtService = debtAmount === null || appliedRate === null || effectiveDebtTenor === null
       ? null
