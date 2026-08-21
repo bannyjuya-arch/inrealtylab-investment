@@ -70,6 +70,10 @@ const DEFAULT_PF_RATE = 7.0;
 const MIN_PF_RATE = 5.0;
 const MAX_PF_RATE = 9.0;
 const PF_RATE_STEP = 0.1;
+const DEFAULT_LTC_PCT = 75;
+const MIN_LTC_PCT = 70;
+const MAX_LTC_PCT = 80;
+const LTC_STEP = 1;
 
 function readContext() {
   const params = new URLSearchParams(window.location.search);
@@ -103,6 +107,7 @@ export default function CommercialAllocationTable() {
   const [financeBenchmark, setFinanceBenchmark] = useState<Record<string, FinanceBenchmark>>({});
   const [financeNote, setFinanceNote] = useState("");
   const [pfRatePct, setPfRatePct] = useState(DEFAULT_PF_RATE);
+  const [ltcPct, setLtcPct] = useState(DEFAULT_LTC_PCT);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -124,6 +129,7 @@ export default function CommercialAllocationTable() {
   const totalProjectCost = directConstructionCost == null
     ? null
     : directConstructionCost + (indirectCost ?? 0) + (contingencyCost ?? 0);
+  const pfLoanAmount = totalProjectCost == null ? null : totalProjectCost * (ltcPct / 100);
 
   useEffect(() => {
     const ctx = readContext();
@@ -135,8 +141,14 @@ export default function CommercialAllocationTable() {
       if (Number.isFinite(savedPfRate) && savedPfRate >= MIN_PF_RATE && savedPfRate <= MAX_PF_RATE) {
         setPfRatePct(savedPfRate);
       }
+      const savedLtc = Number(sessionStorage.getItem("inrealtylab.ltcPct"));
+      if (Number.isFinite(savedLtc) && savedLtc >= MIN_LTC_PCT && savedLtc <= MAX_LTC_PCT) {
+        setLtcPct(Math.round(savedLtc));
+      } else {
+        sessionStorage.setItem("inrealtylab.ltcPct", String(DEFAULT_LTC_PCT));
+      }
     } catch {
-      // Keep default PF rate if browser storage is unavailable.
+      // Keep default finance assumptions if browser storage is unavailable.
     }
 
     if (!/^\d{19}$/.test(ctx.pnu)) return;
@@ -206,6 +218,16 @@ export default function CommercialAllocationTable() {
     setPfRatePct(rounded);
     try {
       sessionStorage.setItem("inrealtylab.pfRatePct", rounded.toFixed(1));
+    } catch {
+      // Continue even if browser storage is unavailable.
+    }
+  }
+
+  function updateLtc(raw: number) {
+    const rounded = Math.round(Math.min(MAX_LTC_PCT, Math.max(MIN_LTC_PCT, raw)));
+    setLtcPct(rounded);
+    try {
+      sessionStorage.setItem("inrealtylab.ltcPct", String(rounded));
     } catch {
       // Continue even if browser storage is unavailable.
     }
@@ -325,6 +347,22 @@ export default function CommercialAllocationTable() {
           <p>총사업비 = 직접 공사비 × 1.20으로 자동 계산합니다. 예: 공사비 200억원 → 간접비 20억원 + 예비비 20억원 → 총사업비 240억원.</p>
         </div>
       )}
+
+      <div className="control-policy-card" style={{ marginTop: 12 }}>
+        <strong>PF 대출비율(LTC) {ltcPct}%</strong>
+        <p>기본 75% · 선택범위 70~80% · 1% 단위. 대출금액은 총사업비 × LTC로 자동 계산합니다.</p>
+        <input
+          type="range"
+          min={MIN_LTC_PCT}
+          max={MAX_LTC_PCT}
+          step={LTC_STEP}
+          value={ltcPct}
+          onChange={(e) => updateLtc(Number(e.target.value))}
+          style={{ width: "100%" }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 4 }}><span>70%</span><span>75%</span><span>80%</span></div>
+        {pfLoanAmount != null && <p style={{ marginTop: 10 }}><strong>PF 대출금액 {Math.round(pfLoanAmount / 100000000).toLocaleString("ko-KR")}억원</strong> · 총사업비 {Math.round((totalProjectCost ?? 0) / 100000000).toLocaleString("ko-KR")}억원 × {ltcPct}%</p>}
+      </div>
 
       <div className="control-policy-card" style={{ marginTop: 12 }}>
         <strong>PF 적용금리 {pfRatePct.toFixed(1)}%</strong>
