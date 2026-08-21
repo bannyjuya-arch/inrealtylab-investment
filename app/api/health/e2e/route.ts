@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabasePublicConfig, supabasePublicHeaders } from "../../lib/supabase-public";
+import { fetchPublicDataXml, publicDataServiceKey } from "../../lib/public-data";
 
 const TEST_PNU = "1120010500104050045";
 
@@ -30,10 +31,71 @@ async function checkJson(name: string, url: string, init?: RequestInit): Promise
   }
 }
 
+async function checkLandUseActivity(key: string): Promise<Check> {
+  if (!key) return { name: "landuse_activity_catalog", ok: false, status: null, detail: "NO_PUBLIC_DATA_KEY" };
+  try {
+    const result = await fetchPublicDataXml(
+      "https://apis.data.go.kr/1613000/arLandUseInfoService",
+      "DTsearchLunCd",
+      { pageNo: "1", numOfRows: "1000" },
+      key
+    );
+    return {
+      name: "landuse_activity_catalog",
+      ok: result.rows.length > 0,
+      status: 200,
+      detail: `resultCode=${result.resultCode ?? "-"}, rows=${result.rows.length}, totalCount=${result.totalCount}`,
+    };
+  } catch (error) {
+    return {
+      name: "landuse_activity_catalog",
+      ok: false,
+      status: null,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function checkBuildingHub(key: string): Promise<Check> {
+  if (!key) return { name: "building_hub_floor", ok: false, status: null, detail: "NO_PUBLIC_DATA_KEY" };
+  const landFlag = TEST_PNU.slice(10, 11);
+  try {
+    const result = await fetchPublicDataXml(
+      "https://apis.data.go.kr/1613000/BldRgstHubService",
+      "getBrFlrOulnInfo",
+      {
+        sigunguCd: TEST_PNU.slice(0, 5),
+        bjdongCd: TEST_PNU.slice(5, 10),
+        platGbCd: landFlag === "2" ? "1" : "0",
+        bun: TEST_PNU.slice(11, 15).padStart(4, "0"),
+        ji: TEST_PNU.slice(15, 19).padStart(4, "0"),
+        numOfRows: "1000",
+        pageNo: "1",
+        _type: "xml",
+      },
+      key
+    );
+    return {
+      name: "building_hub_floor",
+      ok: true,
+      status: 200,
+      detail: `resultCode=${result.resultCode ?? "-"}, rows=${result.rows.length}, totalCount=${result.totalCount}`,
+    };
+  } catch (error) {
+    return {
+      name: "building_hub_floor",
+      ok: false,
+      status: null,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export async function GET() {
   const { url } = supabasePublicConfig();
   const restHeaders = supabasePublicHeaders({ Accept: "application/json" });
   const edgeHeaders = supabasePublicHeaders({ "Content-Type": "application/json" });
+  const publicDataKey = publicDataServiceKey();
 
   const checks = await Promise.all([
     checkJson(
@@ -55,21 +117,20 @@ export async function GET() {
         body: JSON.stringify({ pnu: TEST_PNU, scenarioCode: "BASE", mode: "read" }),
       }
     ),
+    checkLandUseActivity(publicDataKey),
+    checkBuildingHub(publicDataKey),
   ]);
 
   const requiredOk = checks.every((check) => check.ok);
-  const publicDataKeyConfigured = Boolean(
-    process.env.DATA_GO_KR_API_KEY?.trim() || process.env.PUBLIC_DATA_API_KEY?.trim()
-  );
 
   return NextResponse.json(
     {
       ok: requiredOk,
       testPnu: TEST_PNU,
       supabaseProject: "igiltlrafwiszkhvtspb",
-      publicDataKeyConfigured,
+      publicDataKeyConfigured: Boolean(publicDataKey),
       checks,
-      rule: "Do not declare integration complete unless ok=true. External public-data APIs are checked separately because service entitlement can fail independently.",
+      rule: "Do not declare integration complete unless every check is ok=true.",
     },
     { status: requiredOk ? 200 : 503 }
   );
