@@ -1,35 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const OFFICE_FACILITY_KEY = "OFFICE";
-const OFFICE_DB_CODE = "C01_OFFICE";
-
 export async function GET(request: NextRequest) {
-  const facilityKey = request.nextUrl.searchParams.get("facilityKey")?.trim() ?? "";
-
-  if (!facilityKey) {
-    return NextResponse.json(
-      { ok: false, code: "FACILITY_KEY_REQUIRED", message: "사업시설 선택값이 필요합니다." },
-      { status: 400 }
-    );
-  }
-
-  // Current sample rule: only OFFICE has a connected construction-cost benchmark.
-  // Other facility types intentionally return null until their DB mapping is approved.
-  if (facilityKey !== OFFICE_FACILITY_KEY) {
-    return NextResponse.json({
-      ok: true,
-      facilityKey,
-      facilityCode: null,
-      costPerSqm: null,
-      costLow: null,
-      costMid: null,
-      costHigh: null,
-      effectiveDate: null,
-      sourceCode: null,
-      costBasis: null,
-      status: "NO_CONNECTED_COST_DATA",
-    });
-  }
+  const facilityCode = request.nextUrl.searchParams.get("facilityCode")?.trim() ?? "";
+  const all = request.nextUrl.searchParams.get("all") === "1";
 
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const secret = process.env.SUPABASE_SECRET_KEY;
@@ -42,14 +15,20 @@ export async function GET(request: NextRequest) {
   }
 
   const query = new URLSearchParams({
-    select: "facility_code,facility_name,facility_subtype,building_type,effective_date,cost_low,cost_mid,cost_high,cost_unit,cost_basis,source_code,confidence",
-    facility_code: `eq.${OFFICE_DB_CODE}`,
-    facility_subtype: "eq.DEFAULT",
-    limit: "1",
+    select: "facility_code,category_code,category_name,default_cost_per_sqm,benchmark_count,latest_effective_date,source_codes,normalized_cost_basis",
+    order: "category_code.asc",
   });
 
+  if (facilityCode) query.set("facility_code", `eq.${facilityCode}`);
+  else if (!all) {
+    return NextResponse.json(
+      { ok: false, code: "FACILITY_CODE_REQUIRED", message: "facilityCode 또는 all=1이 필요합니다." },
+      { status: 400 }
+    );
+  }
+
   try {
-    const response = await fetch(`${url}/rest/v1/part3_construction_cost_ready?${query.toString()}`, {
+    const response = await fetch(`${url}/rest/v1/part3_commercial_cost_default?${query.toString()}`, {
       cache: "no-store",
       headers: {
         apikey: secret,
@@ -65,58 +44,31 @@ export async function GET(request: NextRequest) {
 
     const rows = (await response.json()) as Array<{
       facility_code: string;
-      facility_name: string | null;
-      facility_subtype: string | null;
-      building_type: string | null;
-      effective_date: string | null;
-      cost_low: number | string | null;
-      cost_mid: number | string | null;
-      cost_high: number | string | null;
-      cost_unit: string | null;
-      cost_basis: string | null;
-      source_code: string | null;
-      confidence: number | string | null;
+      category_code: string;
+      category_name: string;
+      default_cost_per_sqm: number | string | null;
+      benchmark_count: number | string | null;
+      latest_effective_date: string | null;
+      source_codes: string | null;
+      normalized_cost_basis: string | null;
     }>;
 
-    const row = rows[0];
-    if (!row) {
-      return NextResponse.json({
-        ok: true,
-        facilityKey,
-        facilityCode: OFFICE_DB_CODE,
-        costPerSqm: null,
-        costLow: null,
-        costMid: null,
-        costHigh: null,
-        effectiveDate: null,
-        sourceCode: null,
-        costBasis: null,
-        status: "OFFICE_COST_NOT_FOUND",
-      });
-    }
-
-    const toNumber = (value: number | string | null) => {
-      if (value === null) return null;
-      const parsed = Number(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    };
+    const normalized = rows.map((row) => ({
+      facilityCode: row.facility_code,
+      categoryCode: row.category_code,
+      categoryName: row.category_name,
+      defaultCostPerSqm: row.default_cost_per_sqm == null ? null : Number(row.default_cost_per_sqm),
+      benchmarkCount: row.benchmark_count == null ? 0 : Number(row.benchmark_count),
+      latestEffectiveDate: row.latest_effective_date,
+      sourceCodes: row.source_codes,
+      costBasis: row.normalized_cost_basis,
+    }));
 
     return NextResponse.json({
       ok: true,
-      facilityKey,
-      facilityCode: row.facility_code,
-      facilitySubtype: row.facility_subtype,
-      buildingType: row.building_type,
-      costPerSqm: toNumber(row.cost_mid),
-      costLow: toNumber(row.cost_low),
-      costMid: toNumber(row.cost_mid),
-      costHigh: toNumber(row.cost_high),
-      costUnit: row.cost_unit,
-      effectiveDate: row.effective_date,
-      sourceCode: row.source_code,
-      costBasis: row.cost_basis,
-      confidence: toNumber(row.confidence),
-      status: "CONNECTED",
+      costs: normalized,
+      costUnit: "KRW_PER_SQM",
+      vatBasis: "EXCLUDED",
     });
   } catch (error) {
     return NextResponse.json(
