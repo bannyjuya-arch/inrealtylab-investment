@@ -323,7 +323,7 @@ export default function ReportPage() {
             <Metric label="건폐율 상한" value={formatPercent(snapshot.statutoryBcrMaxPct ?? null)} />
             <Metric label="용적률 상한" value={formatPercent(snapshot.statutoryFarMaxPct ?? null)} />
             <Metric label={`공시지가 기준 토지가치${landPriceYears.length ? ` (${landPriceYears.join("/")}년)` : ""}`} value={formatWon(officialLandValue)} />
-            <Metric label="연 토지사용료 1%" value={formatWon(analysis.annualLandFee)} />
+            <Metric label="연 토지사용료 5%" value={formatWon(analysis.annualLandFee)} />
             <div className="report-source" style={{ marginTop: 8 }}>
               {landPriceByPnu.size ? "국토교통부 개별공시지가정보 자동조회" : "공시지가 자동조회값 없음 — 확인 필요"}
             </div>
@@ -380,7 +380,7 @@ export default function ReportPage() {
       <section className="report-page">
         <div className="report-kicker">03 · PPP FEASIBILITY / GO-NO GO</div>
         <h2 className="report-title">사업성 매트릭스와 추진여부</h2>
-        <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 1% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
+        <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 5% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
         <div className="report-grid three">
           <div className="report-card"><h3>토지</h3><Metric label="토지가치" value={formatWon(officialLandValue)} /><Metric label="연 사용료" value={formatWon(analysis.annualLandFee)} /></div>
           <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
