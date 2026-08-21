@@ -1,13 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-  "https://igiltlrafwiszkhvtspb.supabase.co";
-
-const SUPABASE_PUBLISHABLE_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
-  "sb_publishable_Gy4GhKbuZU9vV3hEoPQ5Og_5P4_5_9e";
+import { supabasePublicConfig, supabasePublicHeaders } from "../lib/supabase-public";
 
 const PUBLIC_DATA_API_KEY =
   process.env.DATA_GO_KR_API_KEY?.trim() ||
@@ -117,14 +109,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const headers: Record<string, string> = {
+    const { url } = supabasePublicConfig();
+    const headers: Record<string, string> = supabasePublicHeaders({
       "Content-Type": "application/json",
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-    };
+    });
     if (PUBLIC_DATA_API_KEY) headers["x-public-data-key"] = PUBLIC_DATA_API_KEY;
 
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/part1-allowed-use`, {
+    const response = await fetch(`${url}/functions/v1/part1-allowed-use`, {
       method: "POST",
       cache: "no-store",
       headers,
