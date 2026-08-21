@@ -91,6 +91,7 @@ const TOTAL_PROJECT_COST_FACTOR = 1.2;
 const DEFAULT_LTC_PCT = 75;
 const MIN_LTC_PCT = 70;
 const MAX_LTC_PCT = 80;
+const FIXED_OCCUPANCY_RATE = 0.95;
 
 function nonNegative(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
@@ -265,7 +266,7 @@ export function buildIntegratedAnalysis(input: {
   });
 
   const monthlyRent = nonNegative(input.assumptions.monthlyRentPerSqm);
-  const occupancy = Math.min(95, Math.max(80, input.assumptions.occupancyPct)) / 100;
+  const occupancy = FIXED_OCCUPANCY_RATE;
   const opexPct = nonNegative(input.assumptions.opexPct);
   const referenceRate = nonNegative(input.assumptions.referenceRatePct);
   const pfSpread = nonNegative(input.assumptions.pfSpreadPct);
