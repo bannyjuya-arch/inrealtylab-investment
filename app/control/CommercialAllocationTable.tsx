@@ -41,6 +41,9 @@ type AllocationResponse = {
   facilities?: FacilityRow[];
 };
 
+const INDIRECT_COST_RATE = 0.10;
+const CONTINGENCY_RATE = 0.10;
+
 function readContext() {
   const params = new URLSearchParams(window.location.search);
   const pnu = (params.get("pnus") ?? params.get("pnu") ?? "").split(",")[0]?.trim() ?? "";
@@ -77,7 +80,7 @@ export default function CommercialAllocationTable() {
   const remaining = Math.max(0, 100 - total);
   const complete = Math.abs(total - 100) < 0.000001;
 
-  const totalConstructionCost = useMemo(() => {
+  const directConstructionCost = useMemo(() => {
     if (!complete || commercialPoolGfaSqm == null) return null;
     return rows.reduce((sum, row) => {
       const area = commercialPoolGfaSqm * Number(row.ratio_pct || 0) / 100;
@@ -85,6 +88,12 @@ export default function CommercialAllocationTable() {
       return sum + area * unitCost;
     }, 0);
   }, [complete, commercialPoolGfaSqm, rows, costInputs]);
+
+  const indirectCost = directConstructionCost == null ? null : directConstructionCost * INDIRECT_COST_RATE;
+  const contingencyCost = directConstructionCost == null ? null : directConstructionCost * CONTINGENCY_RATE;
+  const totalProjectCost = directConstructionCost == null
+    ? null
+    : directConstructionCost + (indirectCost ?? 0) + (contingencyCost ?? 0);
 
   useEffect(() => {
     const ctx = readContext();
@@ -190,7 +199,7 @@ export default function CommercialAllocationTable() {
 
       <div className="control-policy-card">
         <strong>배분 원칙</strong>
-        <p>각 시설은 0%도 가능합니다. 합계는 100%를 넘을 수 없으며, 정확히 100%가 되어야 수익시설 면적과 공사비 총액이 확정됩니다.</p>
+        <p>각 시설은 0%도 가능합니다. 합계는 100%를 넘을 수 없으며, 정확히 100%가 되어야 수익시설 면적과 사업비가 확정됩니다.</p>
       </div>
 
       <div className="metric-grid" style={{ marginBottom: 16 }}>
@@ -259,15 +268,20 @@ export default function CommercialAllocationTable() {
 
       <div className="control-policy-card" style={{ marginTop: 16 }}>
         <strong>합계 {total.toFixed(1)}% · 잔여 {remaining.toFixed(1)}%</strong>
-        <p>{complete ? "100% 배분 완료 — 시설별 연면적과 공사비를 확정할 수 있습니다." : "100%가 되기 전까지 시설별 면적과 공사비 총액은 확정하지 않습니다."}</p>
+        <p>{complete ? "100% 배분 완료 — 시설별 연면적과 사업비를 확정할 수 있습니다." : "100%가 되기 전까지 시설별 면적과 사업비 총액은 확정하지 않습니다."}</p>
         <p>공사비 기본값은 현재 DB의 대표 벤치마크 평균을 VAT 제외 기준으로 통일한 값이며, 사용자가 직접 수정할 수 있습니다.</p>
         <button type="button" onClick={save} disabled={loading}>{loading ? "저장 중" : "비율 저장"}</button>
       </div>
 
-      {totalConstructionCost != null && (
+      {directConstructionCost != null && totalProjectCost != null && (
         <div className="control-policy-card" style={{ marginTop: 12 }}>
-          <strong>수익시설 총 공사비 {Math.round(totalConstructionCost / 100000000).toLocaleString("ko-KR")}억원</strong>
-          <p>시설별 확정면적 × 적용 공사비(원/㎡)의 합계입니다. 설계비·CM/CS·금융비용·예비비 등은 별도 사업비 항목으로 추가합니다.</p>
+          <strong>총사업비 {Math.round(totalProjectCost / 100000000).toLocaleString("ko-KR")}억원</strong>
+          <dl style={{ marginTop: 12 }}>
+            <div><dt>직접 공사비</dt><dd>{Math.round(directConstructionCost / 100000000).toLocaleString("ko-KR")}억원</dd></div>
+            <div><dt>간접비</dt><dd>{Math.round((indirectCost ?? 0) / 100000000).toLocaleString("ko-KR")}억원 · 공사비의 10%</dd></div>
+            <div><dt>예비비</dt><dd>{Math.round((contingencyCost ?? 0) / 100000000).toLocaleString("ko-KR")}억원 · 공사비의 10%</dd></div>
+          </dl>
+          <p>총사업비 = 직접 공사비 × 1.20으로 자동 계산합니다. 예: 공사비 200억원 → 간접비 20억원 + 예비비 20억원 → 총사업비 240억원.</p>
         </div>
       )}
 
