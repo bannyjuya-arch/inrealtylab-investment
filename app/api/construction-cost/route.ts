@@ -1,15 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-  process.env.SUPABASE_URL?.trim() ||
-  "https://igiltlrafwiszkhvtspb.supabase.co";
-
-const SUPABASE_KEY =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
-  process.env.SUPABASE_SECRET_KEY?.trim() ||
-  "sb_publishable_Gy4GhKbuZU9vV3hEoPQ5Og_5P4_5_9e";
+import { supabasePublicConfig, supabasePublicHeaders } from "../lib/supabase-public";
 
 export async function GET(request: NextRequest) {
   const facilityCode = request.nextUrl.searchParams.get("facilityCode")?.trim() ?? "";
@@ -29,13 +19,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/part3_commercial_cost_default?${query.toString()}`, {
+    const { url } = supabasePublicConfig();
+    const response = await fetch(`${url}/rest/v1/part3_commercial_cost_default?${query.toString()}`, {
       cache: "no-store",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        Accept: "application/json",
-      },
+      headers: supabasePublicHeaders({ Accept: "application/json" }),
     });
 
     if (!response.ok) {
