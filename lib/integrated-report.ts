@@ -102,6 +102,7 @@ type LinkedPart1Scenario = {
 
 type CommercialAllocationSnapshot = {
   complete?: boolean;
+  commercialPoolGfaSqm?: number | null;
   facilities?: Array<{
     facilityCode?: string;
     ratioPct?: number;
@@ -114,6 +115,7 @@ const DEFAULT_LTC_PCT = 75;
 const MIN_LTC_PCT = 70;
 const MAX_LTC_PCT = 80;
 const LEASE_OCCUPANCY_RATE = 0.95;
+const PILOT_COMMERCIAL_RATIO = 0.60;
 
 const FACILITY_REVENUE_POLICY: Record<string, { efficiency: number; opexPct: number; leaseBased: boolean }> = {
   C01_OFFICE: { efficiency: 0.5245, opexPct: 36, leaseBased: true },
@@ -301,6 +303,8 @@ export function buildIntegratedAnalysis(input: {
   const farMax = nonNegative(input.farMaxPct);
   const publicRequiredGfa = nonNegative(input.demand.publicRequiredGfa);
   const commercialSupportableGfa = sumCommercial(input.demand.commercialSupportableGfa);
+  const allocationSnapshot = readCommercialAllocation();
+  const allocationReady = Boolean(allocationSnapshot?.complete && allocationSnapshot.facilities?.length);
   const fullDemandGfa = publicRequiredGfa !== null && commercialSupportableGfa !== null
     ? publicRequiredGfa + commercialSupportableGfa
     : null;
@@ -322,16 +326,21 @@ export function buildIntegratedAnalysis(input: {
     const totalConstructionGfa = undergroundGfa === null ? null : aboveGroundGfa + undergroundGfa;
     const demandGapGfa = fullDemandGfa === null ? null : aboveGroundGfa - fullDemandGfa;
     const demandFit = demandGapGfa === null
-      ? "REVIEW"
+      ? allocationReady ? "REVIEW" : "REVIEW"
       : demandGapGfa < 0
         ? "SHORT"
         : demandGapGfa === 0
           ? "EXACT"
           : "EXCESS";
 
-    const selectedCommercialGfa = publicRequiredGfa === null || commercialSupportableGfa === null
-      ? null
-      : Math.min(commercialSupportableGfa, Math.max(0, aboveGroundGfa - publicRequiredGfa));
+    const selectedCommercialGfa = publicRequiredGfa !== null && commercialSupportableGfa !== null
+      ? Math.min(commercialSupportableGfa, Math.max(0, aboveGroundGfa - publicRequiredGfa))
+      : allocationReady
+        ? Math.min(
+            Math.max(0, aboveGroundGfa * PILOT_COMMERCIAL_RATIO),
+            nonNegative(allocationSnapshot?.commercialPoolGfaSqm) ?? Math.max(0, aboveGroundGfa * PILOT_COMMERCIAL_RATIO),
+          )
+        : null;
 
     const constructionCapex = totalConstructionGfa === null || costPerSqm === null
       ? null
