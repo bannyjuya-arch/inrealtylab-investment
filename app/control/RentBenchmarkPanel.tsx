@@ -2,10 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-type FacilityCode = "C01_OFFICE" | "C02_RETAIL" | "C04_LIVING";
+type DbFacilityCode = "C01_OFFICE" | "C02_RETAIL" | "C04_LIVING";
+type FacilityCode =
+  | DbFacilityCode
+  | "C03_HOSPITALITY"
+  | "C05_HEALTHCARE"
+  | "C06_EDUCATION"
+  | "C07_CULTURE_ENTERTAINMENT"
+  | "C08_RND_LAB"
+  | "C09_LOGISTICS"
+  | "C10_DIGITAL_INFRA";
 
 type RentRow = {
-  facility_code: FacilityCode;
+  facility_code: DbFacilityCode;
   geography_type: string;
   geography_code: string | null;
   geography_name: string | null;
@@ -34,11 +43,28 @@ type RentResponse = {
   } | null;
 };
 
-const FACILITIES: Array<{ code: FacilityCode; label: string; description: string }> = [
-  { code: "C01_OFFICE", label: "C01 오피스", description: "서울 권역별 시장 임대료" },
-  { code: "C02_RETAIL", label: "C02 리테일", description: "R-ONE 상권 임대시세" },
-  { code: "C04_LIVING", label: "C04 리빙", description: "국토부 전월세 실거래 기반" },
+type FacilityDefinition = {
+  code: FacilityCode;
+  label: string;
+  description: string;
+  dbLinked: boolean;
+};
+
+const FACILITIES: FacilityDefinition[] = [
+  { code: "C01_OFFICE", label: "C01 오피스", description: "서울 권역별 시장 임대료", dbLinked: true },
+  { code: "C02_RETAIL", label: "C02 리테일", description: "R-ONE 상권 임대시세", dbLinked: true },
+  { code: "C03_HOSPITALITY", label: "C03 숙박", description: "시범검토 기본값", dbLinked: false },
+  { code: "C04_LIVING", label: "C04 리빙", description: "국토부 전월세 실거래 기반", dbLinked: true },
+  { code: "C05_HEALTHCARE", label: "C05 헬스케어", description: "시범검토 기본값", dbLinked: false },
+  { code: "C06_EDUCATION", label: "C06 교육", description: "시범검토 기본값", dbLinked: false },
+  { code: "C07_CULTURE_ENTERTAINMENT", label: "C07 문화·엔터", description: "시범검토 기본값", dbLinked: false },
+  { code: "C08_RND_LAB", label: "C08 R&D / LAB", description: "시범검토 기본값", dbLinked: false },
+  { code: "C09_LOGISTICS", label: "C09 물류", description: "시범검토 기본값", dbLinked: false },
+  { code: "C10_DIGITAL_INFRA", label: "C10 디지털인프라", description: "시범검토 기본값", dbLinked: false },
 ];
+
+const DB_FACILITIES = FACILITIES.filter((facility): facility is FacilityDefinition & { code: DbFacilityCode } => facility.dbLinked);
+const ZERO_RENT_FACILITIES = FACILITIES.filter((facility) => !facility.dbLinked);
 
 function currentPnu() {
   const params = new URLSearchParams(window.location.search);
@@ -66,11 +92,11 @@ function formatRent(value: number | string | null | undefined) {
 
 export default function RentBenchmarkPanel() {
   const [pnu, setPnu] = useState("");
-  const [data, setData] = useState<Partial<Record<FacilityCode, RentResponse>>>({});
+  const [data, setData] = useState<Partial<Record<DbFacilityCode, RentResponse>>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  async function load(code: FacilityCode, refreshLiving = false) {
+  async function load(code: DbFacilityCode, refreshLiving = false) {
     const params = new URLSearchParams({ facility: code });
     if (pnu) params.set("pnu", pnu);
     if (code === "C04_LIVING" && refreshLiving) {
@@ -100,12 +126,27 @@ export default function RentBenchmarkPanel() {
   useEffect(() => {
     const nextPnu = currentPnu();
     setPnu(nextPnu);
+
+    try {
+      for (const facility of ZERO_RENT_FACILITIES) {
+        sessionStorage.setItem(`inrealtylab.rent.${facility.code}`, "0");
+        sessionStorage.setItem(`inrealtylab.rent.${facility.code}.source`, JSON.stringify({
+          source_kind: "PILOT_DEFAULT",
+          source_name: "시범검토 기본값",
+          rent_per_sqm_month: 0,
+          unit: "KRW/sqm/month",
+          note: "임대료 DB 미구축 시설은 시범검토 기간 동안 0원/㎡·월 적용",
+        }));
+      }
+    } catch {
+      // Continue if browser storage is unavailable.
+    }
   }, []);
 
   useEffect(() => {
     if (!pnu) return;
     setLoading(true);
-    Promise.allSettled(FACILITIES.map((facility) => load(facility.code)))
+    Promise.allSettled(DB_FACILITIES.map((facility) => load(facility.code)))
       .then((results) => {
         const rejected = results.find((result) => result.status === "rejected");
         if (rejected && rejected.status === "rejected") {
@@ -136,12 +177,12 @@ export default function RentBenchmarkPanel() {
     <section className="control-section rent-benchmark-section">
       <div className="control-section-title">
         <span>OPERATING RENT DB</span>
-        <strong>오피스 · 리테일 · 리빙 임대료 자동연결</strong>
+        <strong>C01~C10 시범 임대료 기준</strong>
       </div>
 
       <div className="control-policy-card">
-        <strong>적용 원칙</strong>
-        <p>오피스는 서울 권역별 시장 임대료, 리테일은 R-ONE 상권 임대시세, 리빙은 국토부 전월세 실거래를 사용합니다. DB 값은 운영수지의 기본값으로만 사용하고 출처·기준일을 함께 보존합니다.</p>
+        <strong>시범검토 적용 원칙</strong>
+        <p>C01 오피스·C02 리테일·C04 리빙만 임대료 DB 후보값을 사용합니다. C03·C05·C06·C07·C08·C09·C10은 DB 구축 전까지 0원/㎡·월로 고정합니다.</p>
       </div>
 
       <div style={{ overflowX: "auto" }}>
@@ -152,20 +193,34 @@ export default function RentBenchmarkPanel() {
               <th style={{ textAlign: "left", padding: 10 }}>지역/권역</th>
               <th style={{ textAlign: "right", padding: 10 }}>임대료</th>
               <th style={{ textAlign: "center", padding: 10 }}>기준일</th>
-              <th style={{ textAlign: "left", padding: 10 }}>출처</th>
+              <th style={{ textAlign: "left", padding: 10 }}>출처/상태</th>
               <th style={{ textAlign: "right", padding: 10 }}>표본</th>
             </tr>
           </thead>
           <tbody>
             {FACILITIES.map((facility) => {
-              const response = data[facility.code];
-              const preferred = facility.code === "C01_OFFICE"
+              if (!facility.dbLinked) {
+                return (
+                  <tr key={facility.code}>
+                    <td style={{ padding: 10 }}><strong>{facility.label}</strong><div style={{ fontSize: 12, opacity: 0.7 }}>{facility.description}</div></td>
+                    <td style={{ padding: 10 }}>-</td>
+                    <td style={{ padding: 10, textAlign: "right" }}><strong>{formatRent(0)}</strong></td>
+                    <td style={{ padding: 10, textAlign: "center" }}>시범검토</td>
+                    <td style={{ padding: 10 }}>DB 미구축 · 0원 고정</td>
+                    <td style={{ padding: 10, textAlign: "right" }}>-</td>
+                  </tr>
+                );
+              }
+
+              const code = facility.code as DbFacilityCode;
+              const response = data[code];
+              const preferred = code === "C01_OFFICE"
                 ? response?.rows?.find((row) => row.submarket === "SEOUL_TOTAL") ?? response?.latest
                 : response?.latest;
               return (
                 <tr key={facility.code}>
                   <td style={{ padding: 10 }}><strong>{facility.label}</strong><div style={{ fontSize: 12, opacity: 0.7 }}>{facility.description}</div></td>
-                  <td style={{ padding: 10 }}>{preferred?.submarket ?? preferred?.geography_name ?? (facility.code === "C02_RETAIL" ? "상권자료 대기" : "-")}</td>
+                  <td style={{ padding: 10 }}>{preferred?.submarket ?? preferred?.geography_name ?? (code === "C02_RETAIL" ? "상권자료 대기" : "-")}</td>
                   <td style={{ padding: 10, textAlign: "right" }}><strong>{formatRent(preferred?.rent_per_sqm_month)}</strong></td>
                   <td style={{ padding: 10, textAlign: "center" }}>{preferred?.base_date ?? "-"}</td>
                   <td style={{ padding: 10 }}>{preferred?.source_name ?? preferred?.source_code ?? response?.note ?? "-"}</td>
