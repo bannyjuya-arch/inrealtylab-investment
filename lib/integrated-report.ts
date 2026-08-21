@@ -54,6 +54,7 @@ export type ScenarioCapacity = {
   demandFit: "SHORT" | "EXACT" | "EXCESS" | "REVIEW";
   selectedCommercialGfa: number | null;
   constructionCapex: number | null;
+  totalProjectCost: number | null;
 };
 
 export type FinancialCell = {
@@ -86,6 +87,11 @@ type LinkedPart1Scenario = {
   grossFloorAreaSqm?: number | null;
 };
 
+const TOTAL_PROJECT_COST_FACTOR = 1.2;
+const DEFAULT_LTC_PCT = 75;
+const MIN_LTC_PCT = 70;
+const MAX_LTC_PCT = 80;
+
 function nonNegative(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
   return Math.max(0, value);
@@ -113,6 +119,18 @@ function readSelectedPfRatePct() {
     return Math.min(9, Math.max(5, value));
   } catch {
     return null;
+  }
+}
+
+function readSelectedLtcPct() {
+  if (typeof window === "undefined") return DEFAULT_LTC_PCT;
+  try {
+    const raw = window.sessionStorage.getItem("inrealtylab.ltcPct");
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return DEFAULT_LTC_PCT;
+    return Math.round(Math.min(MAX_LTC_PCT, Math.max(MIN_LTC_PCT, value)));
+  } catch {
+    return DEFAULT_LTC_PCT;
   }
 }
 
@@ -228,6 +246,7 @@ export function buildIntegratedAnalysis(input: {
     const constructionCapex = totalConstructionGfa === null || costPerSqm === null
       ? null
       : totalConstructionGfa * costPerSqm;
+    const totalProjectCost = constructionCapex === null ? null : constructionCapex * TOTAL_PROJECT_COST_FACTOR;
 
     return {
       key: scenario.key,
@@ -241,6 +260,7 @@ export function buildIntegratedAnalysis(input: {
       demandFit,
       selectedCommercialGfa,
       constructionCapex,
+      totalProjectCost,
     };
   });
 
@@ -250,7 +270,7 @@ export function buildIntegratedAnalysis(input: {
   const referenceRate = nonNegative(input.assumptions.referenceRatePct);
   const pfSpread = nonNegative(input.assumptions.pfSpreadPct);
   const selectedPfRate = readSelectedPfRatePct();
-  const debtRatio = nonNegative(input.assumptions.debtRatioPct);
+  const selectedLtcPct = readSelectedLtcPct();
   const debtTenor = nonNegative(input.assumptions.debtTenorYears);
   const investorRequiredReturn = nonNegative(input.assumptions.investorRequiredReturnPct);
   const otherAnnualRevenue = nonNegative(input.assumptions.otherAnnualRevenue) ?? 0;
@@ -264,9 +284,9 @@ export function buildIntegratedAnalysis(input: {
       ? null
       : annualRevenue - annualOpex - annualLandFee;
 
-    const debtAmount = capacity.constructionCapex === null || debtRatio === null
+    const debtAmount = capacity.totalProjectCost === null
       ? null
-      : capacity.constructionCapex * (debtRatio / 100);
+      : capacity.totalProjectCost * (selectedLtcPct / 100);
     const appliedRatePct = selectedPfRate ?? (referenceRate === null || pfSpread === null ? null : referenceRate + pfSpread);
     const appliedRate = appliedRatePct === null ? null : appliedRatePct / 100;
     const effectiveDebtTenor = debtTenor === null ? null : Math.max(1, Math.min(term, Math.round(debtTenor)));
@@ -277,10 +297,10 @@ export function buildIntegratedAnalysis(input: {
       ? null
       : annualProjectCashflow / annualDebtService;
 
-    const projectIrr = capacity.constructionCapex === null || annualProjectCashflow === null
+    const projectIrr = capacity.totalProjectCost === null || annualProjectCashflow === null
       ? null
       : calculateIrr([
-          -capacity.constructionCapex,
+          -capacity.totalProjectCost,
           ...Array.from({ length: term }, () => annualProjectCashflow),
         ]);
 
