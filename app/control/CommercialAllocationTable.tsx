@@ -105,7 +105,7 @@ function persistCommercialAllocation(
   try {
     const facilities = rows.map((row) => {
       const ratioPct = Number(row.ratio_pct || 0);
-      const allocatedGfaSqm = complete && commercialPoolGfaSqm != null
+      const allocatedGfaSqm = commercialPoolGfaSqm != null
         ? commercialPoolGfaSqm * ratioPct / 100
         : null;
       return {
@@ -248,6 +248,16 @@ export default function CommercialAllocationTable() {
     ));
   }
 
+  function updateArea(code: string, raw: string) {
+    if (commercialPoolGfaSqm == null || commercialPoolGfaSqm <= 0) {
+      setMessage("수익시설 Pool 면적을 먼저 확인해야 합니다.");
+      return;
+    }
+    const area = Math.max(0, Math.min(commercialPoolGfaSqm, Number(raw || 0)));
+    const ratio = area / commercialPoolGfaSqm * 100;
+    updateRatio(code, String(ratio));
+  }
+
   function updateCost(code: string, raw: string) {
     const value = Math.max(0, Number(raw || 0));
     setCostInputs((current) => ({ ...current, [code]: value }));
@@ -298,7 +308,7 @@ export default function CommercialAllocationTable() {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data?.message ?? "저장에 실패했습니다.");
       persistCommercialAllocation(pnu, commercialPoolGfaSqm, rows, complete);
-      setMessage(complete ? "수익시설 면적배분이 100%로 확정되었습니다." : `저장되었습니다. 남은 비율 ${remaining.toFixed(1)}%를 배분해 주세요.`);
+      setMessage(complete ? "수익시설 비율·면적이 100%로 확정되었습니다." : `저장되었습니다. 남은 비율 ${remaining.toFixed(1)}%를 배분해 주세요.`);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "저장 중 오류가 발생했습니다.");
     } finally {
@@ -315,12 +325,12 @@ export default function CommercialAllocationTable() {
     <section className="control-section commercial-allocation-section">
       <div className="control-section-title">
         <span>COMMERCIAL PROGRAM</span>
-        <strong>수익시설 비율 · 공사비 직접 검토</strong>
+        <strong>수익시설 비율 · 면적 · 공사비 직접 검토</strong>
       </div>
 
       <div className="control-policy-card">
         <strong>배분 원칙</strong>
-        <p>각 시설은 0%도 가능합니다. 합계는 100%를 넘을 수 없으며, 정확히 100%가 되어야 수익시설 면적과 사업비가 확정됩니다.</p>
+        <p>비율과 배분면적은 서로 연동됩니다. 면적을 직접 수정하면 비율이 자동 환산되고, 비율을 수정하면 면적이 자동 변경됩니다. 합계는 100%를 넘을 수 없습니다.</p>
       </div>
 
       <div className="metric-grid" style={{ marginBottom: 16 }}>
@@ -344,7 +354,7 @@ export default function CommercialAllocationTable() {
           </thead>
           <tbody>
             {rows.map((row) => {
-              const area = complete && commercialPoolGfaSqm != null
+              const area = commercialPoolGfaSqm != null
                 ? commercialPoolGfaSqm * Number(row.ratio_pct || 0) / 100
                 : null;
               const defaultCost = costDefaults[row.facility_code]?.defaultCostPerSqm ?? null;
@@ -355,9 +365,11 @@ export default function CommercialAllocationTable() {
                   <td style={{ padding: 10 }}><strong>{row.category_code} · {row.category_name}</strong></td>
                   <td style={{ padding: 10, textAlign: "center" }}>{row.selectable ? (row.legal_status === "CONDITIONAL" ? "조건부" : "가능") : "불가/미확인"}</td>
                   <td style={{ padding: 10, textAlign: "right" }}>
-                    <input type="number" min={0} max={100} step={1} value={row.ratio_pct} disabled={!row.selectable} onChange={(e) => updateRatio(row.facility_code, e.target.value)} style={{ width: 82, textAlign: "right" }} /> %
+                    <input type="number" min={0} max={100} step={0.1} value={Number(row.ratio_pct || 0)} disabled={!row.selectable} onChange={(e) => updateRatio(row.facility_code, e.target.value)} style={{ width: 82, textAlign: "right" }} /> %
                   </td>
-                  <td style={{ padding: 10, textAlign: "right" }}>{area == null ? "미확정" : `${Math.round(area).toLocaleString("ko-KR")}㎡`}</td>
+                  <td style={{ padding: 10, textAlign: "right" }}>
+                    <input type="number" min={0} step={1} value={area == null ? "" : Math.round(area)} disabled={!row.selectable || commercialPoolGfaSqm == null} onChange={(e) => updateArea(row.facility_code, e.target.value)} style={{ width: 112, textAlign: "right" }} /> ㎡
+                  </td>
                   <td style={{ padding: 10, textAlign: "right" }}>{defaultCost == null ? "-" : `${Math.round(defaultCost).toLocaleString("ko-KR")}원/㎡`}</td>
                   <td style={{ padding: 10, textAlign: "right" }}>
                     <input type="number" min={0} step={10000} value={Math.round(appliedCost)} disabled={!row.selectable} onChange={(e) => updateCost(row.facility_code, e.target.value)} style={{ width: 122, textAlign: "right" }} />
@@ -372,9 +384,9 @@ export default function CommercialAllocationTable() {
 
       <div className="control-policy-card" style={{ marginTop: 16 }}>
         <strong>합계 {total.toFixed(1)}% · 잔여 {remaining.toFixed(1)}%</strong>
-        <p>{complete ? "100% 배분 완료 — 시설별 연면적과 사업비를 확정할 수 있습니다." : "100%가 되기 전까지 시설별 면적과 사업비 총액은 확정하지 않습니다."}</p>
+        <p>{complete ? "100% 배분 완료 — 시설별 연면적과 사업비를 확정할 수 있습니다." : "비율 또는 면적을 직접 입력해 100%까지 배분해 주세요."}</p>
         <p>공사비 기본값은 현재 DB의 대표 벤치마크 평균을 VAT 제외 기준으로 통일한 값이며, 사용자가 직접 수정할 수 있습니다.</p>
-        <button type="button" onClick={save} disabled={loading}>{loading ? "저장 중" : "비율 저장"}</button>
+        <button type="button" onClick={save} disabled={loading}>{loading ? "저장 중" : "비율·면적 저장"}</button>
       </div>
 
       {directConstructionCost != null && totalProjectCost != null && (
