@@ -272,7 +272,6 @@ export function buildIntegratedAnalysis(input: {
   const pfSpread = nonNegative(input.assumptions.pfSpreadPct);
   const selectedPfRate = readSelectedPfRatePct();
   const selectedLtcPct = readSelectedLtcPct();
-  const debtTenor = nonNegative(input.assumptions.debtTenorYears);
   const investorRequiredReturn = nonNegative(input.assumptions.investorRequiredReturnPct);
   const otherAnnualRevenue = nonNegative(input.assumptions.otherAnnualRevenue) ?? 0;
 
@@ -290,8 +289,8 @@ export function buildIntegratedAnalysis(input: {
       : capacity.totalProjectCost * (selectedLtcPct / 100);
     const appliedRatePct = selectedPfRate ?? (referenceRate === null || pfSpread === null ? null : referenceRate + pfSpread);
     const appliedRate = appliedRatePct === null ? null : appliedRatePct / 100;
-    const effectiveDebtTenor = debtTenor === null ? null : Math.max(1, Math.min(term, Math.round(debtTenor)));
-    const annualDebtService = debtAmount === null || appliedRate === null || effectiveDebtTenor === null
+    const effectiveDebtTenor = term;
+    const annualDebtService = debtAmount === null || appliedRate === null
       ? null
       : annuityPayment(debtAmount, appliedRate, effectiveDebtTenor);
     const dscr = annualProjectCashflow === null || annualDebtService === null || annualDebtService <= 0
