@@ -1,16 +1,17 @@
 import { NextResponse } from "next/server";
 
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+  process.env.SUPABASE_URL?.trim() ||
+  "https://igiltlrafwiszkhvtspb.supabase.co";
+
+const SUPABASE_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+  process.env.SUPABASE_SECRET_KEY?.trim() ||
+  "sb_publishable_Gy4GhKbuZU9vV3hEoPQ5Og_5P4_5_9e";
+
 export async function GET() {
-  const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
-  const secret = process.env.SUPABASE_SECRET_KEY;
-
-  if (!url || !secret) {
-    return NextResponse.json(
-      { ok: false, code: "SUPABASE_CONFIG_MISSING", message: "금융 벤치마크 DB 연결 설정이 없습니다." },
-      { status: 503 }
-    );
-  }
-
   const query = new URLSearchParams({
     select: "metric_code,finance_type,value_low,value_mid,value_high,unit,base_date,benchmark_type,source_code,publisher,report_name,notes",
     metric_code: "in.(REFERENCE_RATE,BANK_LENDING_RATE)",
@@ -18,11 +19,11 @@ export async function GET() {
   });
 
   try {
-    const response = await fetch(`${url}/rest/v1/part3_finance_benchmark?${query.toString()}`, {
+    const response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1/part3_finance_benchmark?${query.toString()}`, {
       cache: "no-store",
       headers: {
-        apikey: secret,
-        Authorization: `Bearer ${secret}`,
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
         Accept: "application/json",
       },
     });
