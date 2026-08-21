@@ -23,6 +23,29 @@ type CostRow = {
   costBasis: string | null;
 };
 
+type FinanceBenchmark = {
+  metricCode: string;
+  financeType: string | null;
+  valueLow: number | null;
+  valueMid: number | null;
+  valueHigh: number | null;
+  unit: string | null;
+  baseDate: string | null;
+  benchmarkType: string | null;
+  sourceCode: string | null;
+  publisher: string | null;
+  reportName: string | null;
+  notes: string | null;
+};
+
+type FinanceResponse = {
+  ok: boolean;
+  benchmark?: Record<string, FinanceBenchmark>;
+  pfSpecificAvailable?: boolean;
+  note?: string;
+  message?: string;
+};
+
 type AllocationResponse = {
   ok: boolean;
   message?: string;
@@ -43,6 +66,10 @@ type AllocationResponse = {
 
 const INDIRECT_COST_RATE = 0.10;
 const CONTINGENCY_RATE = 0.10;
+const DEFAULT_PF_RATE = 7.0;
+const MIN_PF_RATE = 5.0;
+const MAX_PF_RATE = 9.0;
+const PF_RATE_STEP = 0.1;
 
 function readContext() {
   const params = new URLSearchParams(window.location.search);
@@ -73,6 +100,9 @@ export default function CommercialAllocationTable() {
   const [commercialPoolGfaSqm, setCommercialPoolGfaSqm] = useState<number | null>(null);
   const [costDefaults, setCostDefaults] = useState<Record<string, CostRow>>({});
   const [costInputs, setCostInputs] = useState<Record<string, number>>({});
+  const [financeBenchmark, setFinanceBenchmark] = useState<Record<string, FinanceBenchmark>>({});
+  const [financeNote, setFinanceNote] = useState("");
+  const [pfRatePct, setPfRatePct] = useState(DEFAULT_PF_RATE);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -100,6 +130,15 @@ export default function CommercialAllocationTable() {
     setPnu(ctx.pnu);
     setAboveGroundGfaSqm(ctx.gfa);
 
+    try {
+      const savedPfRate = Number(sessionStorage.getItem("inrealtylab.pfRatePct"));
+      if (Number.isFinite(savedPfRate) && savedPfRate >= MIN_PF_RATE && savedPfRate <= MAX_PF_RATE) {
+        setPfRatePct(savedPfRate);
+      }
+    } catch {
+      // Keep default PF rate if browser storage is unavailable.
+    }
+
     if (!/^\d{19}$/.test(ctx.pnu)) return;
 
     const qs = new URLSearchParams({ pnu: ctx.pnu, scenarioCode: "BASE" });
@@ -109,8 +148,9 @@ export default function CommercialAllocationTable() {
     Promise.all([
       fetch(`/api/commercial-allocation?${qs.toString()}`, { cache: "no-store" }).then((r) => r.json().then((data) => ({ ok: r.ok, data }))),
       fetch("/api/construction-cost?all=1", { cache: "no-store" }).then((r) => r.json().then((data) => ({ ok: r.ok, data }))),
+      fetch("/api/finance-benchmark", { cache: "no-store" }).then((r) => r.json().then((data) => ({ ok: r.ok, data: data as FinanceResponse }))),
     ])
-      .then(([allocationResult, costResult]) => {
+      .then(([allocationResult, costResult, financeResult]) => {
         if (!allocationResult.ok || !allocationResult.data.ok) {
           throw new Error(allocationResult.data?.message ?? "수익시설 배분정보를 불러오지 못했습니다.");
         }
@@ -130,6 +170,11 @@ export default function CommercialAllocationTable() {
         }
         setCostDefaults(costMap);
         setCostInputs(inputMap);
+
+        if (financeResult.ok && financeResult.data.ok) {
+          setFinanceBenchmark(financeResult.data.benchmark ?? {});
+          setFinanceNote(financeResult.data.note ?? "");
+        }
       })
       .catch((e) => setMessage(e instanceof Error ? e.message : "조회 중 오류가 발생했습니다."))
       .finally(() => setLoading(false));
@@ -154,6 +199,16 @@ export default function CommercialAllocationTable() {
   function updateCost(code: string, raw: string) {
     const value = Math.max(0, Number(raw || 0));
     setCostInputs((current) => ({ ...current, [code]: value }));
+  }
+
+  function updatePfRate(raw: number) {
+    const rounded = Math.round(Math.min(MAX_PF_RATE, Math.max(MIN_PF_RATE, raw)) * 10) / 10;
+    setPfRatePct(rounded);
+    try {
+      sessionStorage.setItem("inrealtylab.pfRatePct", rounded.toFixed(1));
+    } catch {
+      // Continue even if browser storage is unavailable.
+    }
   }
 
   async function save() {
@@ -189,6 +244,9 @@ export default function CommercialAllocationTable() {
   }
 
   if (!/^\d{19}$/.test(pnu)) return null;
+
+  const baseRate = financeBenchmark.REFERENCE_RATE;
+  const bankRate = financeBenchmark.BANK_LENDING_RATE;
 
   return (
     <section className="control-section commercial-allocation-section">
@@ -234,29 +292,12 @@ export default function CommercialAllocationTable() {
                   <td style={{ padding: 10 }}><strong>{row.category_code} · {row.category_name}</strong></td>
                   <td style={{ padding: 10, textAlign: "center" }}>{row.selectable ? (row.legal_status === "CONDITIONAL" ? "조건부" : "가능") : "불가/미확인"}</td>
                   <td style={{ padding: 10, textAlign: "right" }}>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={row.ratio_pct}
-                      disabled={!row.selectable}
-                      onChange={(e) => updateRatio(row.facility_code, e.target.value)}
-                      style={{ width: 82, textAlign: "right" }}
-                    /> %
+                    <input type="number" min={0} max={100} step={1} value={row.ratio_pct} disabled={!row.selectable} onChange={(e) => updateRatio(row.facility_code, e.target.value)} style={{ width: 82, textAlign: "right" }} /> %
                   </td>
                   <td style={{ padding: 10, textAlign: "right" }}>{area == null ? "미확정" : `${Math.round(area).toLocaleString("ko-KR")}㎡`}</td>
                   <td style={{ padding: 10, textAlign: "right" }}>{defaultCost == null ? "-" : `${Math.round(defaultCost).toLocaleString("ko-KR")}원/㎡`}</td>
                   <td style={{ padding: 10, textAlign: "right" }}>
-                    <input
-                      type="number"
-                      min={0}
-                      step={10000}
-                      value={Math.round(appliedCost)}
-                      disabled={!row.selectable}
-                      onChange={(e) => updateCost(row.facility_code, e.target.value)}
-                      style={{ width: 122, textAlign: "right" }}
-                    />
+                    <input type="number" min={0} step={10000} value={Math.round(appliedCost)} disabled={!row.selectable} onChange={(e) => updateCost(row.facility_code, e.target.value)} style={{ width: 122, textAlign: "right" }} />
                   </td>
                   <td style={{ padding: 10, textAlign: "right" }}>{facilityCost == null ? "미확정" : `${Math.round(facilityCost / 100000000).toLocaleString("ko-KR")}억원`}</td>
                 </tr>
@@ -284,6 +325,26 @@ export default function CommercialAllocationTable() {
           <p>총사업비 = 직접 공사비 × 1.20으로 자동 계산합니다. 예: 공사비 200억원 → 간접비 20억원 + 예비비 20억원 → 총사업비 240억원.</p>
         </div>
       )}
+
+      <div className="control-policy-card" style={{ marginTop: 12 }}>
+        <strong>PF 적용금리 {pfRatePct.toFixed(1)}%</strong>
+        <p>기본 7.0% · 선택범위 5.0~9.0% · 0.1% 단위. 선택한 금리는 Part 3 DSCR 계산에 직접 적용됩니다.</p>
+        <input
+          type="range"
+          min={MIN_PF_RATE}
+          max={MAX_PF_RATE}
+          step={PF_RATE_STEP}
+          value={pfRatePct}
+          onChange={(e) => updatePfRate(Number(e.target.value))}
+          style={{ width: "100%" }}
+        />
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 4 }}><span>5.0%</span><span>7.0%</span><span>9.0%</span></div>
+        <div style={{ marginTop: 12, fontSize: 13, lineHeight: 1.6 }}>
+          {baseRate?.valueMid != null && <div>참고 · 한국은행 기준금리 {baseRate.valueMid.toFixed(2)}% ({baseRate.baseDate ?? "기준일 미상"})</div>}
+          {bankRate?.valueMid != null && <div>참고 · 국내 은행 평균 대출금리 {bankRate.valueMid.toFixed(2)}% ({bankRate.baseDate ?? "기준일 미상"}) · PF 전용 금리 아님</div>}
+          {financeNote && <div>{financeNote}</div>}
+        </div>
+      </div>
 
       {message && <div className="control-warning" style={{ marginTop: 12 }}>{message}</div>}
     </section>
