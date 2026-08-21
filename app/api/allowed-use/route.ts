@@ -14,7 +14,79 @@ const PUBLIC_DATA_API_KEY =
   process.env.PUBLIC_DATA_API_KEY?.trim() ||
   "";
 
+const LANDUSE_BASE = "https://apis.data.go.kr/1613000/arLandUseInfoService";
+
+function tag(xml: string, name: string) {
+  return xml.match(new RegExp(`<${name}>([\\s\\S]*?)<\\/${name}>`, "i"))?.[1]?.trim() ?? "";
+}
+
+function safeSnippet(raw: string) {
+  let out = raw.replace(/\s+/g, " ");
+  if (PUBLIC_DATA_API_KEY) {
+    out = out
+      .replaceAll(PUBLIC_DATA_API_KEY, "[SERVICE_KEY]")
+      .replaceAll(encodeURIComponent(PUBLIC_DATA_API_KEY), "[SERVICE_KEY]");
+  }
+  return out.slice(0, 280);
+}
+
+async function runDiagnostic() {
+  if (!PUBLIC_DATA_API_KEY) {
+    return NextResponse.json({ ok: false, code: "NO_PUBLIC_DATA_KEY", message: "Vercel 공공데이터 키가 없습니다." }, { status: 503 });
+  }
+
+  const attempts: Array<Record<string, string>> = [
+    {},
+    { searchKeyword: "시설" },
+    { keyword: "시설" },
+    { lunNm: "시설" },
+    { luname: "시설" },
+    { searchWrd: "시설" },
+    { searchWord: "시설" },
+  ];
+
+  const results = [];
+  for (const params of attempts) {
+    const qs = new URLSearchParams({
+      ...params,
+      serviceKey: PUBLIC_DATA_API_KEY,
+      pageNo: "1",
+      numOfRows: "1000",
+    });
+    try {
+      const response = await fetch(`${LANDUSE_BASE}/DTsearchLunCd?${qs.toString()}`, {
+        cache: "no-store",
+        headers: { Accept: "application/xml,text/xml,*/*" },
+      });
+      const raw = await response.text();
+      results.push({
+        params,
+        httpStatus: response.status,
+        resultCode: tag(raw, "resultCode") || tag(raw, "returnReasonCode") || null,
+        resultMsg: tag(raw, "resultMsg") || tag(raw, "returnAuthMsg") || tag(raw, "errMsg") || null,
+        itemCount: (raw.match(/<item>/gi) ?? []).length,
+        snippet: safeSnippet(raw),
+      });
+    } catch (error) {
+      results.push({
+        params,
+        httpStatus: null,
+        resultCode: null,
+        resultMsg: error instanceof Error ? error.message : String(error),
+        itemCount: 0,
+        snippet: null,
+      });
+    }
+  }
+
+  return NextResponse.json({ ok: true, endpoint: "DTsearchLunCd", results });
+}
+
 export async function GET(request: NextRequest) {
+  if (request.nextUrl.searchParams.get("diagnostic") === "1") {
+    return runDiagnostic();
+  }
+
   const pnu = request.nextUrl.searchParams.get("pnu")?.trim() ?? "";
   const zoneName = request.nextUrl.searchParams.get("zoneName")?.trim() ?? "";
   const aboveGroundGfaSqm = request.nextUrl.searchParams.get("aboveGroundGfaSqm")?.trim() ?? "";
