@@ -103,8 +103,9 @@ export default function BusinessFacilityCostBridge() {
     if (target) setReactInputValue(target.input, null);
 
     try {
-      const response = await fetch(`/api/construction-cost?facilityKey=${encodeURIComponent(key)}`, { cache: "no-store" });
-      const data = (await response.json()) as CostResponse;
+  const facilityCode = BUSINESS_FACILITIES.find((item) => item.key === key)?.code ?? key;
+  const response = await fetch(`/api/construction-cost?facilityCode=${encodeURIComponent(facilityCode)}`, { cache: "no-store" });
+  const data = (await response.json()) as CostResponse;
       setCost(data);
 
       const nextTarget = findConstructionCostField();
