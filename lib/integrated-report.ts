@@ -301,9 +301,16 @@ function combineEligibility(
 function buildFacilityOperatingLines(selectedCommercialGfa: number | null) {
   if (selectedCommercialGfa === null) return null;
   const allocation = readCommercialAllocation();
-  if (!allocation?.complete || !allocation.facilities?.length) return null;
+  // 2026-08-26 확정: COMMERCIAL PROGRAM(수익시설 비율 배분) 화면을 관리자 전용으로 숨기면서,
+  // 외부 사용자는 배분을 저장할 방법이 없어 매출·DSCR·IRR이 전부 계산 불가(REVIEW)로 남는
+  // 문제가 있었다. 배분 데이터가 없으면 시범검토 기본 시설(OFFICE) 100% 배분을 기본값으로
+  // 사용해 최소한의 사업성 판정이 항상 나오게 한다. 관리자가 실제 배분을 저장하면
+  // 그 값이 우선 적용된다.
+  const facilities = allocation?.complete && allocation.facilities?.length
+    ? allocation.facilities
+    : [{ facilityCode: "C01_OFFICE", ratioPct: 100 }];
 
-  return allocation.facilities.map((facility): FacilityOperatingLine => {
+  return facilities.map((facility): FacilityOperatingLine => {
     const facilityCode = String(facility.facilityCode ?? "");
     const ratioPct = Math.max(0, Math.min(100, Number(facility.ratioPct ?? 0)));
     const allocatedGfaSqm = selectedCommercialGfa * ratioPct / 100;
