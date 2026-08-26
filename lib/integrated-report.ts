@@ -80,9 +80,11 @@ export type FinancialCell = {
   debtAmount: number | null;
   annualDebtService: number | null;
   dscr: number | null;
-  btoBotStatus: "FAIL" | "PASS" | "STRONG" | "REVIEW";
+  btoBotStatus: "FAIL" | "CONDITIONAL" | "PASS" | "STRONG" | "REVIEW";
   projectIrr: number | null;
-  reitsStatus: "FAIL" | "PASS" | "REVIEW";
+  reitsStatus: "FAIL" | "CONDITIONAL" | "PASS" | "REVIEW";
+  /** DSCR·IRR 기준을 종합한 최종 적격성 판정 (worst-of: 하나라도 불가면 불가) */
+  overallEligibility: "NOT_ELIGIBLE" | "CONDITIONAL" | "ELIGIBLE" | "REVIEW";
   investorReturnSatisfied: boolean | null;
   facilityOperatingLines: FacilityOperatingLine[];
 };
@@ -116,6 +118,19 @@ const MIN_LTC_PCT = 70;
 const MAX_LTC_PCT = 80;
 const LEASE_OCCUPANCY_RATE = 0.95;
 const PILOT_COMMERCIAL_RATIO = 0.60;
+
+/**
+ * 2026-08-25 확정: BTO 사업성분석 적격성 판정기준.
+ * 목표수익률(허들레이트)은 1차적으로 시설유형 구분 없이 전체 공통값을 쓰고,
+ * DB(part3_underwriting_default 등)가 축적되면 시설유형별로 세분화할 예정.
+ * "조건부 가능" 구간은 목표수익률 대비 1~2%p 미달 구간(최대 2%p까지), 그 이상
+ * 미달하거나 DSCR이 원리금 상환 자체가 안 되는 수준(1.0 미만)이면 "불가".
+ */
+const IRR_TARGET_PCT = 6.5;
+const IRR_CONDITIONAL_FLOOR_PCT = IRR_TARGET_PCT - 2; // 4.5% 미만이면 불가
+const DSCR_PASS_MIN = 1.2;
+const DSCR_CONDITIONAL_FLOOR = 1.0; // 1.0 미만이면 불가 (원리금 상환 자체 불가)
+const DSCR_STRONG_MIN = 1.3;
 
 const FACILITY_REVENUE_POLICY: Record<string, { efficiency: number; opexPct: number; leaseBased: boolean }> = {
   C01_OFFICE: { efficiency: 0.5245, opexPct: 36, leaseBased: true },
@@ -252,14 +267,35 @@ export function calculateIrr(cashflows: number[]) {
 
 function classifyDscr(dscr: number | null): FinancialCell["btoBotStatus"] {
   if (dscr === null || !Number.isFinite(dscr)) return "REVIEW";
-  if (dscr < 1.2) return "FAIL";
-  if (dscr < 1.3) return "PASS";
+  if (dscr < DSCR_CONDITIONAL_FLOOR) return "FAIL";
+  if (dscr < DSCR_PASS_MIN) return "CONDITIONAL";
+  if (dscr < DSCR_STRONG_MIN) return "PASS";
   return "STRONG";
 }
 
 function classifyIrr(irr: number | null): FinancialCell["reitsStatus"] {
   if (irr === null || !Number.isFinite(irr)) return "REVIEW";
-  return irr >= 0.06 ? "PASS" : "FAIL";
+  if (irr < IRR_CONDITIONAL_FLOOR_PCT / 100) return "FAIL";
+  if (irr < IRR_TARGET_PCT / 100) return "CONDITIONAL";
+  return "PASS";
+}
+
+/** 2026-08-25 확정 종합판정 매트릭스: 둘 다 가능해야 가능, 하나라도 불가면 불가. */
+function combineEligibility(
+  dscrStatus: FinancialCell["btoBotStatus"],
+  irrStatus: FinancialCell["reitsStatus"]
+): FinancialCell["overallEligibility"] {
+  const tier = (status: string): "NOT_ELIGIBLE" | "CONDITIONAL" | "ELIGIBLE" | "REVIEW" => {
+    if (status === "FAIL") return "NOT_ELIGIBLE";
+    if (status === "CONDITIONAL") return "CONDITIONAL";
+    if (status === "REVIEW") return "REVIEW";
+    return "ELIGIBLE"; // PASS, STRONG
+  };
+  const rank: Record<string, number> = { ELIGIBLE: 0, CONDITIONAL: 1, REVIEW: 1, NOT_ELIGIBLE: 2 };
+  const dscrTier = tier(dscrStatus);
+  const irrTier = tier(irrStatus);
+  const worst = rank[dscrTier] >= rank[irrTier] ? dscrTier : irrTier;
+  return worst;
 }
 
 function buildFacilityOperatingLines(selectedCommercialGfa: number | null) {
@@ -416,6 +452,9 @@ export function buildIntegratedAnalysis(input: {
           ...Array.from({ length: term }, () => annualProjectCashflow),
         ]);
 
+    const btoBotStatus = classifyDscr(dscr);
+    const reitsStatus = classifyIrr(projectIrr);
+
     return {
       scenarioKey: capacity.key,
       scenarioLabel: capacity.label,
@@ -427,9 +466,10 @@ export function buildIntegratedAnalysis(input: {
       debtAmount,
       annualDebtService,
       dscr,
-      btoBotStatus: classifyDscr(dscr),
+      btoBotStatus,
       projectIrr,
-      reitsStatus: classifyIrr(projectIrr),
+      reitsStatus,
+      overallEligibility: combineEligibility(btoBotStatus, reitsStatus),
       investorReturnSatisfied: projectIrr === null || investorRequiredReturn === null
         ? null
         : projectIrr >= investorRequiredReturn / 100,

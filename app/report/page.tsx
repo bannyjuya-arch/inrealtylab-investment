@@ -101,9 +101,10 @@ function irrText(value: number | null) {
 }
 
 function statusTone(value: string) {
-  if (value === "PASS") return "pass";
+  if (value === "PASS" || value === "ELIGIBLE") return "pass";
   if (value === "STRONG") return "strong";
-  if (value === "FAIL") return "fail";
+  if (value === "CONDITIONAL") return "conditional";
+  if (value === "FAIL" || value === "NOT_ELIGIBLE") return "fail";
   if (value === "SHORT") return "short";
   if (value === "EXCESS") return "excess";
   if (value === "EXACT") return "fit";
@@ -269,13 +270,17 @@ export default function ReportPage() {
 
   const recommendation = useMemo(() => {
     const rank: Record<string, number> = { BASE: 0, CONSERVATIVE: 1, POSITIVE: 2 };
-    return analysis.financialMatrix
-      .filter((cell) => {
-        const capacity = analysis.capacities.find((item) => item.key === cell.scenarioKey);
-        if (!capacity || capacity.demandFit === "SHORT" || capacity.demandFit === "REVIEW") return false;
-        return cell.btoBotStatus === "PASS" || cell.btoBotStatus === "STRONG" || cell.reitsStatus === "PASS";
-      })
-      .sort((a, b) => (rank[a.scenarioKey] - rank[b.scenarioKey]) || (a.term - b.term))[0] ?? null;
+    const pick = (status: "ELIGIBLE" | "CONDITIONAL") =>
+      analysis.financialMatrix
+        .filter((cell) => {
+          const capacity = analysis.capacities.find((item) => item.key === cell.scenarioKey);
+          if (!capacity || capacity.demandFit === "SHORT" || capacity.demandFit === "REVIEW") return false;
+          return cell.overallEligibility === status;
+        })
+        .sort((a, b) => (rank[a.scenarioKey] - rank[b.scenarioKey]) || (a.term - b.term))[0] ?? null;
+    // 2026-08-25 확정: IRR·DSCR을 모두 충족하는(가능) 조합을 우선 추천하고,
+    // 없으면 조건부 가능 조합을 대신 보여준다(불가 조합만 있는 경우는 추천하지 않음).
+    return pick("ELIGIBLE") ?? pick("CONDITIONAL");
   }, [analysis]);
 
   const finalDecision = ownershipGate === "FAIL"
@@ -285,7 +290,9 @@ export default function ReportPage() {
       : analysis.fullDemandGfa === null
         ? { status: "REVIEW", title: "수요 DB 연결 필요", text: "PUBLIC Required GFA와 COMMERCIAL Supportable GFA가 채워지면 면적 적합성을 판정합니다." }
         : recommendation
-          ? { status: "PASS", title: "사업추진 검토 가능", text: `${recommendation.scenarioLabel} 개발안 / ${recommendation.term}년 조합이 수요 적합성과 최소 한 금융기준을 충족합니다.` }
+          ? recommendation.overallEligibility === "ELIGIBLE"
+            ? { status: "PASS", title: "사업추진 검토 가능", text: `${recommendation.scenarioLabel} 개발안 / ${recommendation.term}년 조합이 수요 적합성과 목표수익률·DSCR 기준을 모두 충족합니다.` }
+            : { status: "CONDITIONAL", title: "조건부 사업추진 검토", text: `${recommendation.scenarioLabel} 개발안 / ${recommendation.term}년 조합이 목표수익률 또는 DSCR 기준에 근접했으나 완전히 충족하지는 못했습니다. 용적률 인센티브·임대료·금리 조정 등 조건 조정 검토가 필요합니다.` }
           : { status: "REVIEW", title: "조건 조정 필요", text: "현재 입력조건에서는 수요와 금융기준을 동시에 충족하는 조합이 없습니다." };
 
   const address = records[0] ? `${records[0].legalDong} ${records[0].jibun}`.trim() : "선택 대지";
@@ -383,13 +390,13 @@ export default function ReportPage() {
         <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 5% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
         <div className="report-grid three">
           <div className="report-card"><h3>토지</h3><Metric label="토지가치" value={formatWon(officialLandValue)} /><Metric label="연 사용료" value={formatWon(analysis.annualLandFee)} /></div>
-          <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
-          <div className="report-card"><h3>REITs</h3><Metric label="PASS" value="Project IRR ≥ 6.0%" /><Metric label="출자자 요구" value={assumptions.investorRequiredReturnPct ? `${assumptions.investorRequiredReturnPct}%` : "별도 입력"} /></div>
+          <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="CONDITIONAL" value="1.00 ≤ Min DSCR < 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
+          <div className="report-card"><h3>REITs</h3><Metric label="PASS" value="Project IRR ≥ 6.5%" /><Metric label="CONDITIONAL" value="4.50% ≤ IRR < 6.5%" /><Metric label="출자자 요구" value={assumptions.investorRequiredReturnPct ? `${assumptions.investorRequiredReturnPct}%` : "별도 입력"} /></div>
         </div>
         <div className="report-section"><div className="report-section-head"><div><span>BTO / BOT</span><br /><strong>Minimum DSCR Matrix</strong></div></div><Matrix mode="BTO" analysis={analysis} /></div>
         <div className="report-section"><div className="report-section-head"><div><span>REITs</span><br /><strong>Project IRR Matrix</strong></div></div><Matrix mode="REITS" analysis={analysis} /></div>
         <div className="report-section report-verdict"><span className={`report-status ${statusTone(finalDecision.status)}`}>{finalDecision.status}</span><strong>{finalDecision.title}</strong><p>{finalDecision.text}</p>{recommendation && <p><b>우선 검토:</b> {recommendation.scenarioLabel} / {recommendation.term}년 · BTO/BOT {recommendation.btoBotStatus} · REITs {recommendation.reitsStatus}</p>}</div>
-        <div className="report-note">실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing, 실제 임대료·OPEX·금리·Lifecycle CAPEX를 반영해 확정합니다. REITs의 6%는 INRealtyLab 내부 Project IRR 판정기준입니다.</div>
+        <div className="report-note">실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing, 실제 임대료·OPEX·금리·Lifecycle CAPEX를 반영해 확정합니다. REITs의 6.5%는 INRealtyLab 내부 Project IRR 판정기준(공통 목표수익률)이며, DSCR·IRR 중 하나라도 CONDITIONAL/FAIL이면 종합판정도 그에 따라 조건부 가능/불가로 표시됩니다.</div>
         <div className="report-page-number">3 / 3</div>
       </section>
     </main>
