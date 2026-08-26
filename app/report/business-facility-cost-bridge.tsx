@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 const BUSINESS_FACILITIES = [
@@ -61,6 +61,11 @@ export default function BusinessFacilityCostBridge() {
   const [selected, setSelected] = useState<FacilityKey | null>(null);
   const [cost, setCost] = useState<CostResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  // 2026-08-26 버그수정: install() 이 라벨 텍스트를 "표준공사비 원/㎡" → "선택 사업시설 공사비 원/㎡"로
+  // 바꿔버린 뒤, findConstructionCostField()가 원래 라벨 텍스트로만 재검색하다 보니
+  // selectFacility() 시점엔 입력창을 다시 못 찾아 값이 절대 반영되지 않던 버그.
+  // 마운트 시점에 찾은 input 엘리먼트 자체를 ref에 고정해두고 재사용한다.
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let timer = 0;
@@ -72,6 +77,7 @@ export default function BusinessFacilityCostBridge() {
       target.label.textContent = "선택 사업시설 공사비 원/㎡";
       target.input.readOnly = true;
       target.input.placeholder = "사업시설 선택 시 DB 자동조회";
+      inputRef.current = target.input;
 
       let node = document.getElementById("inrealtylab-business-facility-selector");
       if (!node) {
@@ -99,8 +105,9 @@ export default function BusinessFacilityCostBridge() {
     setLoading(true);
     setCost(null);
 
-    const target = findConstructionCostField();
-    if (target) setReactInputValue(target.input, null);
+    // install() 이후로는 라벨 텍스트가 바뀌어 findConstructionCostField()가
+    // 더 이상 입력창을 찾지 못한다 — 마운트 시 저장해둔 inputRef를 직접 사용한다.
+    if (inputRef.current) setReactInputValue(inputRef.current, null);
 
     try {
   const facilityCode = BUSINESS_FACILITIES.find((item) => item.key === key)?.code ?? key;
@@ -131,8 +138,7 @@ export default function BusinessFacilityCostBridge() {
     : { ok: false, message: raw.message ?? "공사비 조회 실패" };
   setCost(data);
 
-      const nextTarget = findConstructionCostField();
-      if (nextTarget) setReactInputValue(nextTarget.input, data.ok ? (data.costPerSqm ?? null) : null);
+      if (inputRef.current) setReactInputValue(inputRef.current, data.ok ? (data.costPerSqm ?? null) : null);
 
       try {
         sessionStorage.setItem("inrealtylab.selectedBusinessFacility", JSON.stringify({
@@ -145,8 +151,7 @@ export default function BusinessFacilityCostBridge() {
         // calculation does not depend on storage
       }
     } catch {
-      const nextTarget = findConstructionCostField();
-      if (nextTarget) setReactInputValue(nextTarget.input, null);
+      if (inputRef.current) setReactInputValue(inputRef.current, null);
       setCost({ ok: false, costPerSqm: null, message: "공사비 조회 실패" });
     } finally {
       setLoading(false);
