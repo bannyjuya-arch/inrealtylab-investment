@@ -84,8 +84,9 @@ export default function BusinessFacilityCostBridge() {
         node = document.createElement("div");
         node.id = "inrealtylab-business-facility-selector";
         // 2026-08-26 확정: 외부 공유용 보고서에서는 시설 선택 UI와 단가·DB 출처(내부 원가 데이터)를
-        // 노출하지 않는다 — 계산 결과인 COST 표(Construction CAPEX)만 남기고 이 카드 전체는 인쇄/내보내기 시 숨긴다.
-        node.className = "report-section no-print";
+        // 노출하지 않는다 — 계산 결과인 COST 표(Construction CAPEX)만 남기고 이 카드 전체는 인쇄 시에도,
+        // 관리자로 로그인하지 않은 화면(admin-only)에서도 숨긴다.
+        node.className = "report-section no-print admin-only";
         const assumptionsSection = target.field.closest<HTMLElement>(".report-section");
         assumptionsSection?.parentElement?.insertBefore(node, assumptionsSection);
       }

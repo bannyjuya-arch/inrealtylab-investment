@@ -13,6 +13,7 @@ import {
   type DemandInputs,
   type FinancialAssumptions,
 } from "../../lib/integrated-report";
+import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
 import "./report.css";
 
 type Part1Snapshot = {
@@ -132,6 +133,41 @@ export default function ReportPage() {
   const [basementAutoApplied, setBasementAutoApplied] = useState(false);
   const [demand, setDemand] = useState<DemandInputs>(emptyDemand);
   const [assumptions, setAssumptions] = useState<FinancialAssumptions>(initialAssumptions);
+  // 2026-08-26 확정: 외부 공유용(고객·투자자·지자체)과 내부 관리자 화면을 정식 로그인 기반으로 분리.
+  // 로그인하지 않은 상태(기본값)에서는 입력 도구·단가 카드가 CSS(admin-only)로 숨겨지고,
+  // 계산 결과(판정 매트릭스 등)만 보인다.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    let supabase;
+    try {
+      supabase = getSupabaseBrowserClient();
+    } catch {
+      // 환경변수 미설정 시에도 화면은 방문자 모드로 정상 동작해야 한다.
+      setAuthReady(true);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setIsAdmin(Boolean(data.session));
+      setAuthReady(true);
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAdmin(Boolean(session));
+    });
+
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
+  async function handleAdminLogout() {
+    try {
+      await getSupabaseBrowserClient().auth.signOut();
+    } catch {
+      // 로그인 자체가 구성되지 않은 환경이면 조용히 무시한다.
+    }
+  }
 
   useEffect(() => {
     try {
@@ -320,10 +356,23 @@ export default function ReportPage() {
   }
 
   return (
-    <main className="report-shell">
+    <main className={`report-shell${isAdmin ? " is-admin" : ""}`}>
       <div className="report-toolbar no-print">
-        <div><strong>INRealtyLab · Integrated Executive Review</strong><div className="report-source">Part 1 → Part 2 → Part 3</div></div>
-        <div className="report-toolbar-actions"><button className="report-btn" onClick={() => window.history.back()}>이전</button><button className="report-btn primary" onClick={() => window.print()}>3장 보고서 인쇄 / PDF</button></div>
+        <div><strong>INRealtyLab · Integrated Executive Review</strong><div className="report-source">Part 1 → Part 2 → Part 3{isAdmin ? " · 관리자 모드" : ""}</div></div>
+        <div className="report-toolbar-actions">
+          <button className="report-btn" onClick={() => window.history.back()}>이전</button>
+          <button className="report-btn primary" onClick={() => window.print()}>3장 보고서 인쇄 / PDF</button>
+          {authReady && (isAdmin
+            ? <button className="report-btn" onClick={handleAdminLogout}>로그아웃</button>
+            : <button
+                className="report-btn"
+                onClick={() => {
+                  window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+                }}
+              >
+                관리자 로그인
+              </button>)}
+        </div>
       </div>
 
       <section className="report-page">
@@ -356,7 +405,7 @@ export default function ReportPage() {
               : "건축HUB에서 유효한 지상·지하 층별 면적을 찾지 못해 지하 비율은 자동 추정하지 않았습니다."}
           </div>
         </div>
-        <div className="report-section no-print"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
+        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
           <div className="report-form-grid">
             <Field label="지하/지상 비율 %" value={assumptions.basementRatioPct} onChange={(v) => setAssumption("basementRatioPct", v)} />
             <Field label="표준공사비 원/㎡" value={assumptions.constructionCostPerSqm} onChange={(v) => setAssumption("constructionCostPerSqm", v)} />
@@ -380,7 +429,7 @@ export default function ReportPage() {
           <div className="report-card"><h3>소유권 Gate</h3><Metric label="판정" value={ownershipGate} />{records.map((row, i) => <div className="report-owner-row" key={`${row.pnu}-${i}`}><strong>{row.ownerTypeLabel} · {row.ownerClass}</strong><span>{row.legalDong} {row.jibun}</span></div>)}</div>
           <div className="report-card"><h3>협의대상자</h3><p>1차 · 토지 소유기관</p><p>2차 · 재산관리관·관리권자·운영주체</p><p>3차 · 관리·처분·개발 의사결정권자</p><div className="report-warning">공개 소유정보로 실제 기관명·재산관리관이 확정되지 않으면 “확인 필요”로 유지합니다.</div></div>
         </div>
-        <div className="report-section no-print"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
+        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
           <div className="report-demand-grid"><Field label="PUBLIC Required GFA ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
         </div>
         <div className="report-section"><div className="report-section-head"><div><span>DEMAND FIT</span><br /><strong>개발가능 면적 vs 수요시설 면적</strong></div></div>
