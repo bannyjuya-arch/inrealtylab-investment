@@ -376,7 +376,11 @@ export function buildIntegratedAnalysis(input: {
             Math.max(0, aboveGroundGfa * PILOT_COMMERCIAL_RATIO),
             nonNegative(allocationSnapshot?.commercialPoolGfaSqm) ?? Math.max(0, aboveGroundGfa * PILOT_COMMERCIAL_RATIO),
           )
-        : null;
+        // 2026-08-26 확정: DEMAND ENGINE 슬롯(PUBLIC Required GFA·시설별 연면적)이 전혀
+        // 입력되지 않은 상태(신규 부지 최초 진입 등)에서도 최소한의 사업성 판정을 보여줄 수 있도록,
+        // allocationReady 경로와 동일한 PILOT_COMMERCIAL_RATIO(60%)를 기본 가정으로 적용한다.
+        // 실제 수요 데이터가 입력되면 위 두 조건이 우선 적용되어 이 기본값은 자동으로 대체된다.
+        : Math.max(0, aboveGroundGfa * PILOT_COMMERCIAL_RATIO);
 
     const constructionCapex = totalConstructionGfa === null || costPerSqm === null
       ? null
