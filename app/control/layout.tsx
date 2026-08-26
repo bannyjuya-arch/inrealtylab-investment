@@ -1,8 +1,12 @@
 "use client";
 
-// 2026-08-26 확정: Part 2(소유·DB 원가 검토: OWNERSHIP GATE, COMMERCIAL PROGRAM,
-// OPERATING RENT DB)는 전부 인리얼티 내부 전용 화면이므로, 관리자로 로그인하지 않은
-// 사용자는 이 라우트에 들어와도 실제 내용을 전혀 볼 수 없도록 레이아웃 단계에서 막는다.
+// 2026-08-26 확정 (1차 수정): 처음엔 /control 전체를 로그인 게이트로 막았는데,
+// 이러면 로그인 안 한 일반 사용자가 대지 선택 이후(Part 2 소유판정 → Part 3 보고서)로
+// 아예 진행을 못 하게 되는 문제가 있었다. 그래서 방식을 바꾼다:
+//  - 소유판정 결과(children: OWNERSHIP GATE, PARCEL OWNERSHIP, PROJECT DIRECTION 등)와
+//    Part 3로 넘어가는 ReportLauncher는 그대로 누구나 볼 수 있게 둔다 (정상적인 진행 흐름).
+//  - COMMERCIAL PROGRAM(공사비 단가 직접 조정)과 OPERATING RENT DB(임대료 DB 원본)만
+//    "우리 DB 단가·기준" 내부 데이터이므로, 관리자로 로그인했을 때만 보이게 감싼다.
 
 import { useEffect, useState, type ReactNode } from "react";
 import ReportLauncher from "./ReportLauncher";
@@ -12,19 +16,16 @@ import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
 
 export default function ControlLayout({ children }: { children: ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
-  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     let supabase;
     try {
       supabase = getSupabaseBrowserClient();
     } catch {
-      setAuthReady(true);
       return;
     }
     supabase.auth.getSession().then(({ data }) => {
       setIsAdmin(Boolean(data.session));
-      setAuthReady(true);
     });
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAdmin(Boolean(session));
@@ -32,47 +33,71 @@ export default function ControlLayout({ children }: { children: ReactNode }) {
     return () => subscription.subscription.unsubscribe();
   }, []);
 
-  if (!authReady) return null;
-
-  if (!isAdmin) {
-    return (
-      <main
-        style={{
-          maxWidth: 480,
-          margin: "120px auto",
-          padding: 24,
-          textAlign: "center",
-          fontFamily: "Arial, 'Noto Sans KR', sans-serif",
-        }}
-      >
-        <h1 style={{ fontSize: 20, marginBottom: 10 }}>관리자 로그인이 필요합니다</h1>
-        <p style={{ color: "#667585", fontSize: 14, marginBottom: 20 }}>
-          Part 2 (소유 · DB 원가 검토) 화면은 인리얼티 내부 관리자만 볼 수 있습니다.
-        </p>
-        <a
-          href={`/login?redirect=${encodeURIComponent("/control")}`}
-          style={{
-            display: "inline-block",
-            padding: "10px 16px",
-            borderRadius: 8,
-            background: "#111827",
-            color: "#fff",
-            fontWeight: 700,
-            textDecoration: "none",
-          }}
-        >
-          관리자 로그인
-        </a>
-      </main>
-    );
+  async function handleLogout() {
+    try {
+      await getSupabaseBrowserClient().auth.signOut();
+    } catch {
+      // ignore
+    }
   }
 
   return (
-    <>
+    <div className={isAdmin ? "control-page-root is-admin" : "control-page-root"}>
+      <div
+        style={{
+          maxWidth: 1180,
+          margin: "0 auto",
+          display: "flex",
+          justifyContent: "flex-end",
+          padding: "14px 28px 0",
+        }}
+      >
+        {isAdmin ? (
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={{
+              border: "1px solid #d0d5dd",
+              background: "#fff",
+              color: "#344054",
+              borderRadius: 10,
+              padding: "8px 14px",
+              fontSize: 13,
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+          >
+            로그아웃 (관리자 모드)
+          </button>
+        ) : (
+          <a
+            href="/login?redirect=%2Fcontrol"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              border: "1px solid #d0d5dd",
+              background: "#fff",
+              color: "#344054",
+              borderRadius: 10,
+              padding: "8px 14px",
+              fontSize: 13,
+              fontWeight: 800,
+              textDecoration: "none",
+            }}
+          >
+            관리자 로그인
+          </a>
+        )}
+      </div>
+
       {children}
-      <CommercialAllocationTable />
-      <RentBenchmarkPanel />
+
+      <div className="admin-only">
+        <CommercialAllocationTable />
+        <RentBenchmarkPanel />
+      </div>
+
       <ReportLauncher />
-    </>
+    </div>
   );
 }
