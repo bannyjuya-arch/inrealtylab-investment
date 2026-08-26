@@ -103,6 +103,17 @@ export default function BusinessFacilityCostBridge() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (mount && !selected) {
+      // 2026-08-26 확정: 시설 선택 카드를 관리자 전용(admin-only)으로 숨기면서 외부 사용자는
+      // 시설을 고를 방법이 사라져 공사비·DSCR·IRR이 전부 REVIEW/빈 값으로 나오는 문제가 생겼다.
+      // 시범검토 기본 시설(OFFICE)을 자동 선택해 기본 계산이 항상 돌아가게 하고,
+      // 관리자는 로그인 후 화면에 다시 나타나는 버튼으로 다른 시설을 직접 골라 바꿀 수 있다.
+      void selectFacility("OFFICE");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mount]);
+
   async function selectFacility(key: FacilityKey) {
     setSelected(key);
     setLoading(true);
