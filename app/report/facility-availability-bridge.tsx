@@ -192,7 +192,9 @@ export default function FacilityAvailabilityBridge() {
       if (!node) {
         node = document.createElement("div");
         node.id = "inrealtylab-facility-availability";
-        node.className = "report-section";
+        // 2026-08-26 확정: ALLOWED USE도 Part 2 자동판정 근거(내부 DB 기준)에 해당하므로
+        // 외부 공유용 보고서에서는 인쇄 시에도, 관리자 로그인 전 화면에서도 숨긴다.
+        node.className = "report-section no-print admin-only";
         demandSection.parentElement?.insertBefore(node, demandSection);
       }
       setMount(node);
