@@ -41,11 +41,24 @@ async function waitForCapacity(timeoutMs = 7000) {
   return Array.from(document.querySelectorAll<HTMLElement>(".scenario-card"));
 }
 
-function readPart1Snapshot(pnus: string[]) {
+function findTabButton(tabLabel: string) {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>(".analysis-tabs button")).find(
+    (button) => button.textContent?.trim() === tabLabel
+  );
+}
+
+// SITE 탭에서만 렌더링되는 "통합 대지면적" 값을 읽는다.
+// 반드시 CAPACITY 탭으로 넘어가기 "전"에 호출해야 한다 — CAPACITY 탭으로
+// 전환되면 이 DOM 블록 자체가 사라지기 때문 (activeTab === "SITE" 조건부 렌더링).
+function readSiteAreaSqm() {
   const summaries = Array.from(document.querySelectorAll<HTMLElement>(".analysis-summary"));
   const areaSummary = summaries.find((item) => item.querySelector("span")?.textContent?.trim() === "통합 대지면적");
-  const siteAreaSqm = numberFromText(areaSummary?.querySelector("strong")?.textContent);
+  return numberFromText(areaSummary?.querySelector("strong")?.textContent);
+}
 
+// CAPACITY 탭 전용 값(용도지역/FAR/BCR 기준, 시나리오 카드)을 읽는다.
+// siteAreaSqm은 이미 SITE 탭에서 별도로 캡처해 인자로 전달받는다.
+function readPart1Snapshot(pnus: string[], siteAreaSqm: number | null) {
   const capacityBasis = document.querySelector<HTMLElement>(".capacity-basis");
   const basisText = capacityBasis?.textContent ?? "";
   const farMatch = basisText.match(/FAR\s*([0-9,.]+)%/i);
@@ -87,8 +100,7 @@ export default function Part2Launcher() {
     let uniquePnus = readPnusFromSite();
 
     if (!uniquePnus.length) {
-      const siteButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".analysis-tabs button"))
-        .find((button) => button.textContent?.trim() === "SITE");
+      const siteButton = findTabButton("SITE");
 
       if (siteButton && !siteButton.disabled) {
         siteButton.click();
@@ -102,15 +114,24 @@ export default function Part2Launcher() {
       return;
     }
 
-    const capacityButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".analysis-tabs button"))
-      .find((button) => button.textContent?.trim() === "CAPACITY");
+    // ── SITE 탭 값(통합 대지면적)을 CAPACITY 탭으로 넘어가기 전에 먼저 확보 ──
+    // 이전 버전은 CAPACITY 탭으로 전환한 "뒤"에 이 값을 읽으려고 시도해서
+    // 항상 null이 되었다 (SITE 탭 전용 DOM이 이미 사라진 상태였기 때문).
+    const siteButton = findTabButton("SITE");
+    if (siteButton && !siteButton.disabled) {
+      siteButton.click();
+      await afterReactPaint();
+    }
+    const siteAreaSqm = readSiteAreaSqm();
+
+    const capacityButton = findTabButton("CAPACITY");
 
     if (capacityButton && !capacityButton.disabled) {
       capacityButton.click();
       await waitForCapacity();
     }
 
-    const snapshot = readPart1Snapshot(uniquePnus);
+    const snapshot = readPart1Snapshot(uniquePnus, siteAreaSqm);
     const serializedSnapshot = JSON.stringify(snapshot);
 
     try {

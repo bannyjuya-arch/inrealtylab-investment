@@ -199,35 +199,43 @@ export default function ReportPage() {
     landPrices.map((item) => item.result.standardYear).filter((value): value is string => Boolean(value))
   )], [landPrices]);
 
-  const officialLandValue = useMemo(() => {
-    if (!landPriceByPnu.size) {
-      const usable = records.filter((row) => row.areaSqm !== null && row.officialLandPrice !== null);
-      if (!usable.length) return null;
-      const unique = new Map<string, OwnershipRecord>();
-      for (const row of usable) if (!unique.has(row.pnu)) unique.set(row.pnu, row);
-      return [...unique.values()].reduce((sum, row) => sum + (row.areaSqm ?? 0) * (row.officialLandPrice ?? 0), 0);
-    }
+ const officialLandValue = useMemo(() => {
+  if (!landPriceByPnu.size) {
+    const usable = records.filter((row) => row.areaSqm !== null && row.officialLandPrice !== null);
+    if (!usable.length) return null;
+    const unique = new Map<string, OwnershipRecord>();
+    for (const row of usable) if (!unique.has(row.pnu)) unique.set(row.pnu, row);
+    return [...unique.values()].reduce((sum, row) => sum + (row.areaSqm ?? 0) * (row.officialLandPrice ?? 0), 0);
+  }
 
-    const areaByPnu = new Map<string, number>();
-    for (const row of records) {
-      if (row.areaSqm !== null && row.areaSqm > 0 && !areaByPnu.has(row.pnu)) areaByPnu.set(row.pnu, row.areaSqm);
-    }
+  const areaByPnu = new Map<string, number>();
+  for (const row of records) {
+    if (row.areaSqm !== null && row.areaSqm > 0 && !areaByPnu.has(row.pnu)) areaByPnu.set(row.pnu, row.areaSqm);
+  }
 
-    if (landPriceByPnu.size === 1 && siteAreaSqm !== null) {
-      const price = [...landPriceByPnu.values()][0];
-      return siteAreaSqm * price;
-    }
+  let total = 0;
+  let matched = 0;
+  for (const [pnu, price] of landPriceByPnu) {
+    const area = areaByPnu.get(pnu);
+    if (area === undefined) continue;
+    total += area * price;
+    matched += 1;
+  }
 
-    let total = 0;
-    let matched = 0;
-    for (const [pnu, price] of landPriceByPnu) {
-      const area = areaByPnu.get(pnu);
-      if (area === undefined) continue;
-      total += area * price;
-      matched += 1;
-    }
-    return matched ? total : null;
-  }, [landPriceByPnu, records, siteAreaSqm]);
+  // 필지별 면적(ownership API)이 전부 확보된 경우 → 필지별 가중합이 가장 정확하니 그대로 사용
+  if (matched === landPriceByPnu.size) return total;
+
+  // 필지별 면적 매칭에 실패했더라도, 조회된 공시지가 단가가 전부 동일하면
+  // 통합 대지면적(siteAreaSqm) × 단가로 근사 계산한다.
+  // (인접 필지는 같은 법정동/고시구역이면 개별공시지가가 동일한 경우가 흔함)
+  const prices = [...landPriceByPnu.values()];
+  const allSamePrice = prices.every((p) => p === prices[0]);
+  if (allSamePrice && siteAreaSqm !== null) {
+    return siteAreaSqm * prices[0];
+  }
+
+  return matched ? total : null;
+}, [landPriceByPnu, records, siteAreaSqm]);
 
   const basementReference = useMemo(() => {
     const valid = floorData

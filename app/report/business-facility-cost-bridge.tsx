@@ -103,9 +103,33 @@ export default function BusinessFacilityCostBridge() {
     if (target) setReactInputValue(target.input, null);
 
     try {
-      const response = await fetch(`/api/construction-cost?facilityKey=${encodeURIComponent(key)}`, { cache: "no-store" });
-      const data = (await response.json()) as CostResponse;
-      setCost(data);
+  const facilityCode = BUSINESS_FACILITIES.find((item) => item.key === key)?.code ?? key;
+  const response = await fetch(`/api/construction-cost?facilityCode=${encodeURIComponent(facilityCode)}`, { cache: "no-store" });
+  const raw = (await response.json()) as {
+    ok: boolean;
+    message?: string;
+    costs?: Array<{
+      facilityCode: string;
+      defaultCostPerSqm: number | null;
+      latestEffectiveDate: string | null;
+      sourceCodes: string | null;
+      costBasis: string | null;
+    }>;
+  };
+  const first = raw.ok ? raw.costs?.[0] : undefined;
+  const data: CostResponse = raw.ok
+    ? {
+        ok: true,
+        facilityCode: first?.facilityCode ?? facilityCode,
+        costPerSqm: first?.defaultCostPerSqm ?? null,
+        effectiveDate: first?.latestEffectiveDate ?? null,
+        sourceCode: first?.sourceCodes ?? null,
+        costBasis: first?.costBasis ?? null,
+        status: first ? "OK" : "NOT_FOUND",
+        message: first ? undefined : "해당 시설의 공사비 데이터가 아직 없습니다.",
+      }
+    : { ok: false, message: raw.message ?? "공사비 조회 실패" };
+  setCost(data);
 
       const nextTarget = findConstructionCostField();
       if (nextTarget) setReactInputValue(nextTarget.input, data.ok ? (data.costPerSqm ?? null) : null);
