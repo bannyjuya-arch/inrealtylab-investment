@@ -4,8 +4,19 @@ export default function ReportLauncher() {
   function openReport() {
     const params = new URLSearchParams(window.location.search);
     const pnus = params.get("pnus") ?? params.get("pnu") ?? "";
+    const part1 = params.get("part1") ?? "";
+
+    if (part1) {
+      try {
+        sessionStorage.setItem("inrealtylab.part1Snapshot", part1);
+      } catch {
+        // Continue even if browser storage is unavailable.
+      }
+    }
+
     const next = new URLSearchParams();
     if (pnus) next.set("pnus", pnus);
+    if (part1) next.set("part1", part1);
     window.location.href = `/report?${next.toString()}`;
   }
 

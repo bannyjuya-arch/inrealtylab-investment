@@ -13,6 +13,7 @@ import {
   type DemandInputs,
   type FinancialAssumptions,
 } from "../../lib/integrated-report";
+import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
 import "./report.css";
 
 type Part1Snapshot = {
@@ -42,6 +43,32 @@ type OwnershipResponse = {
 };
 
 type OwnershipParcel = { pnu: string; result: OwnershipResponse };
+
+type LandPriceResponse = {
+  ok: boolean;
+  pnu?: string;
+  pricePerSqm?: number | null;
+  standardYear?: string | null;
+  message?: string;
+  source?: { name?: string; provider?: string; unit?: string };
+};
+
+type LandPriceParcel = { pnu: string; result: LandPriceResponse };
+
+type FloorSummary = {
+  basementAreaSqm: number;
+  aboveGroundAreaSqm: number;
+  basementRatioPct: number | null;
+};
+
+type FloorResponse = {
+  ok: boolean;
+  summary?: FloorSummary;
+  message?: string;
+  source?: { name?: string; endpoint?: string };
+};
+
+type FloorParcel = { pnu: string; result: FloorResponse };
 
 const emptyDemand: DemandInputs = {
   publicRequiredGfa: null,
@@ -75,20 +102,72 @@ function irrText(value: number | null) {
 }
 
 function statusTone(value: string) {
-  if (value === "PASS") return "pass";
+  if (value === "PASS" || value === "ELIGIBLE") return "pass";
   if (value === "STRONG") return "strong";
-  if (value === "FAIL") return "fail";
+  if (value === "CONDITIONAL") return "conditional";
+  if (value === "FAIL" || value === "NOT_ELIGIBLE") return "fail";
   if (value === "SHORT") return "short";
   if (value === "EXCESS") return "excess";
   if (value === "EXACT") return "fit";
   return "review";
 }
 
+function parsePnuForBuildingHub(pnu: string) {
+  if (!/^\d{19}$/.test(pnu)) return null;
+  const landFlag = pnu.slice(10, 11);
+  const platGbCd = landFlag === "2" ? "1" : "0";
+  return {
+    sigunguCd: pnu.slice(0, 5),
+    bjdongCd: pnu.slice(5, 10),
+    platGbCd,
+    bun: pnu.slice(11, 15),
+    ji: pnu.slice(15, 19),
+  };
+}
+
 export default function ReportPage() {
   const [snapshot, setSnapshot] = useState<Part1Snapshot>({});
   const [ownership, setOwnership] = useState<OwnershipParcel[]>([]);
+  const [landPrices, setLandPrices] = useState<LandPriceParcel[]>([]);
+  const [floorData, setFloorData] = useState<FloorParcel[]>([]);
+  const [basementAutoApplied, setBasementAutoApplied] = useState(false);
   const [demand, setDemand] = useState<DemandInputs>(emptyDemand);
   const [assumptions, setAssumptions] = useState<FinancialAssumptions>(initialAssumptions);
+  // 2026-08-26 확정: 외부 공유용(고객·투자자·지자체)과 내부 관리자 화면을 정식 로그인 기반으로 분리.
+  // 로그인하지 않은 상태(기본값)에서는 입력 도구·단가 카드가 CSS(admin-only)로 숨겨지고,
+  // 계산 결과(판정 매트릭스 등)만 보인다.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    let supabase;
+    try {
+      supabase = getSupabaseBrowserClient();
+    } catch {
+      // 환경변수 미설정 시에도 화면은 방문자 모드로 정상 동작해야 한다.
+      setAuthReady(true);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      setIsAdmin(Boolean(data.session));
+      setAuthReady(true);
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAdmin(Boolean(session));
+    });
+
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
+  async function handleAdminLogout() {
+    try {
+      await getSupabaseBrowserClient().auth.signOut();
+    } catch {
+      // 로그인 자체가 구성되지 않은 환경이면 조용히 무시한다.
+    }
+  }
 
   useEffect(() => {
     try {
@@ -99,12 +178,13 @@ export default function ReportPage() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    const pnus = (params.get("pnus") ?? params.get("pnu") ?? "")
+    const pnus = [...new Set((params.get("pnus") ?? params.get("pnu") ?? "")
       .split(",")
       .map((item) => item.trim())
-      .filter((item) => /^\d{19}$/.test(item));
+      .filter((item) => /^\d{19}$/.test(item)))];
 
     if (!pnus.length) return;
+
     Promise.all(
       pnus.map(async (pnu) => {
         try {
@@ -115,15 +195,106 @@ export default function ReportPage() {
         }
       })
     ).then(setOwnership);
+
+    Promise.all(
+      pnus.map(async (pnu) => {
+        try {
+          const response = await fetch(`/api/land-price?pnu=${encodeURIComponent(pnu)}`, { cache: "no-store" });
+          return { pnu, result: (await response.json()) as LandPriceResponse };
+        } catch (error) {
+          return { pnu, result: { ok: false, message: error instanceof Error ? error.message : "개별공시지가 조회 실패" } };
+        }
+      })
+    ).then(setLandPrices);
+
+    Promise.all(
+      pnus.map(async (pnu) => {
+        const parsed = parsePnuForBuildingHub(pnu);
+        if (!parsed) return { pnu, result: { ok: false, message: "PNU 해석 실패" } as FloorResponse };
+        const query = new URLSearchParams(parsed);
+        try {
+          const response = await fetch(`/api/building-hub/floors?${query.toString()}`, { cache: "no-store" });
+          return { pnu, result: (await response.json()) as FloorResponse };
+        } catch (error) {
+          return { pnu, result: { ok: false, message: error instanceof Error ? error.message : "건축HUB 층별 조회 실패" } };
+        }
+      })
+    ).then(setFloorData);
   }, []);
 
   const records = useMemo(() => ownership.flatMap((item) => item.result.records ?? []), [ownership]);
   const siteAreaSqm = snapshot.siteAreaSqm ?? (records.length ? records.reduce((sum, row) => sum + (row.areaSqm ?? 0), 0) : null);
-  const officialLandValue = useMemo(() => {
+
+  const landPriceByPnu = useMemo(() => new Map(
+    landPrices
+      .filter((item) => item.result.ok && item.result.pricePerSqm !== null && item.result.pricePerSqm !== undefined)
+      .map((item) => [item.pnu, item.result.pricePerSqm as number])
+  ), [landPrices]);
+
+  const landPriceYears = useMemo(() => [...new Set(
+    landPrices.map((item) => item.result.standardYear).filter((value): value is string => Boolean(value))
+  )], [landPrices]);
+
+ const officialLandValue = useMemo(() => {
+  if (!landPriceByPnu.size) {
     const usable = records.filter((row) => row.areaSqm !== null && row.officialLandPrice !== null);
     if (!usable.length) return null;
-    return usable.reduce((sum, row) => sum + (row.areaSqm ?? 0) * (row.officialLandPrice ?? 0), 0);
-  }, [records]);
+    const unique = new Map<string, OwnershipRecord>();
+    for (const row of usable) if (!unique.has(row.pnu)) unique.set(row.pnu, row);
+    return [...unique.values()].reduce((sum, row) => sum + (row.areaSqm ?? 0) * (row.officialLandPrice ?? 0), 0);
+  }
+
+  const areaByPnu = new Map<string, number>();
+  for (const row of records) {
+    if (row.areaSqm !== null && row.areaSqm > 0 && !areaByPnu.has(row.pnu)) areaByPnu.set(row.pnu, row.areaSqm);
+  }
+
+  let total = 0;
+  let matched = 0;
+  for (const [pnu, price] of landPriceByPnu) {
+    const area = areaByPnu.get(pnu);
+    if (area === undefined) continue;
+    total += area * price;
+    matched += 1;
+  }
+
+  // 필지별 면적(ownership API)이 전부 확보된 경우 → 필지별 가중합이 가장 정확하니 그대로 사용
+  if (matched === landPriceByPnu.size) return total;
+
+  // 필지별 면적 매칭에 실패했더라도, 조회된 공시지가 단가가 전부 동일하면
+  // 통합 대지면적(siteAreaSqm) × 단가로 근사 계산한다.
+  // (인접 필지는 같은 법정동/고시구역이면 개별공시지가가 동일한 경우가 흔함)
+  const prices = [...landPriceByPnu.values()];
+  const allSamePrice = prices.every((p) => p === prices[0]);
+  if (allSamePrice && siteAreaSqm !== null) {
+    return siteAreaSqm * prices[0];
+  }
+
+  return matched ? total : null;
+}, [landPriceByPnu, records, siteAreaSqm]);
+
+  const basementReference = useMemo(() => {
+    const valid = floorData
+      .map((item) => item.result.summary)
+      .filter((summary): summary is FloorSummary => Boolean(summary && summary.aboveGroundAreaSqm > 0 && summary.basementRatioPct !== null));
+    if (!valid.length) return null;
+    const above = valid.reduce((sum, item) => sum + item.aboveGroundAreaSqm, 0);
+    const below = valid.reduce((sum, item) => sum + item.basementAreaSqm, 0);
+    return {
+      ratioPct: above > 0 ? (below / above) * 100 : null,
+      basementAreaSqm: below,
+      aboveGroundAreaSqm: above,
+      sampleCount: valid.length,
+    };
+  }, [floorData]);
+
+  useEffect(() => {
+    if (basementAutoApplied || assumptions.basementRatioPct !== null || basementReference?.ratioPct === null || basementReference?.ratioPct === undefined) return;
+    setAssumptions((current) => current.basementRatioPct === null
+      ? { ...current, basementRatioPct: Number(basementReference.ratioPct?.toFixed(2)) }
+      : current);
+    setBasementAutoApplied(true);
+  }, [basementAutoApplied, assumptions.basementRatioPct, basementReference]);
 
   const analysis = useMemo(() => buildIntegratedAnalysis({
     siteAreaSqm,
@@ -143,13 +314,17 @@ export default function ReportPage() {
 
   const recommendation = useMemo(() => {
     const rank: Record<string, number> = { BASE: 0, CONSERVATIVE: 1, POSITIVE: 2 };
-    return analysis.financialMatrix
-      .filter((cell) => {
-        const capacity = analysis.capacities.find((item) => item.key === cell.scenarioKey);
-        if (!capacity || capacity.demandFit === "SHORT" || capacity.demandFit === "REVIEW") return false;
-        return cell.btoBotStatus === "PASS" || cell.btoBotStatus === "STRONG" || cell.reitsStatus === "PASS";
-      })
-      .sort((a, b) => (rank[a.scenarioKey] - rank[b.scenarioKey]) || (a.term - b.term))[0] ?? null;
+    const pick = (status: "ELIGIBLE" | "CONDITIONAL") =>
+      analysis.financialMatrix
+        .filter((cell) => {
+          const capacity = analysis.capacities.find((item) => item.key === cell.scenarioKey);
+          if (!capacity || capacity.demandFit === "SHORT" || capacity.demandFit === "REVIEW") return false;
+          return cell.overallEligibility === status;
+        })
+        .sort((a, b) => (rank[a.scenarioKey] - rank[b.scenarioKey]) || (a.term - b.term))[0] ?? null;
+    // 2026-08-25 확정: IRR·DSCR을 모두 충족하는(가능) 조합을 우선 추천하고,
+    // 없으면 조건부 가능 조합을 대신 보여준다(불가 조합만 있는 경우는 추천하지 않음).
+    return pick("ELIGIBLE") ?? pick("CONDITIONAL");
   }, [analysis]);
 
   const finalDecision = ownershipGate === "FAIL"
@@ -159,7 +334,9 @@ export default function ReportPage() {
       : analysis.fullDemandGfa === null
         ? { status: "REVIEW", title: "수요 DB 연결 필요", text: "PUBLIC Required GFA와 COMMERCIAL Supportable GFA가 채워지면 면적 적합성을 판정합니다." }
         : recommendation
-          ? { status: "PASS", title: "사업추진 검토 가능", text: `${recommendation.scenarioLabel} 개발안 / ${recommendation.term}년 조합이 수요 적합성과 최소 한 금융기준을 충족합니다.` }
+          ? recommendation.overallEligibility === "ELIGIBLE"
+            ? { status: "PASS", title: "사업추진 검토 가능", text: `${recommendation.scenarioLabel} 개발안 / ${recommendation.term}년 조합이 수요 적합성과 목표수익률·DSCR 기준을 모두 충족합니다.` }
+            : { status: "CONDITIONAL", title: "조건부 사업추진 검토", text: `${recommendation.scenarioLabel} 개발안 / ${recommendation.term}년 조합이 목표수익률 또는 DSCR 기준에 근접했으나 완전히 충족하지는 못했습니다. 용적률 인센티브·임대료·금리 조정 등 조건 조정 검토가 필요합니다.` }
           : { status: "REVIEW", title: "조건 조정 필요", text: "현재 입력조건에서는 수요와 금융기준을 동시에 충족하는 조합이 없습니다." };
 
   const address = records[0] ? `${records[0].legalDong} ${records[0].jibun}`.trim() : "선택 대지";
@@ -167,6 +344,7 @@ export default function ReportPage() {
 
   function setAssumption(key: keyof FinancialAssumptions, value: string | number) {
     const numeric = typeof value === "number" ? value : parseNumber(value);
+    if (key === "basementRatioPct") setBasementAutoApplied(true);
     setAssumptions((current) => ({ ...current, [key]: numeric }));
   }
 
@@ -178,10 +356,23 @@ export default function ReportPage() {
   }
 
   return (
-    <main className="report-shell">
+    <main className={`report-shell${isAdmin ? " is-admin" : ""}`}>
       <div className="report-toolbar no-print">
-        <div><strong>INRealtyLab · Integrated Executive Review</strong><div className="report-source">Part 1 → Part 2 → Part 3</div></div>
-        <div className="report-toolbar-actions"><button className="report-btn" onClick={() => window.history.back()}>이전</button><button className="report-btn primary" onClick={() => window.print()}>3장 보고서 인쇄 / PDF</button></div>
+        <div><strong>INRealtyLab · Integrated Executive Review</strong><div className="report-source">Part 1 → Part 2 → Part 3{isAdmin ? " · 관리자 모드" : ""}</div></div>
+        <div className="report-toolbar-actions">
+          <button className="report-btn" onClick={() => window.history.back()}>이전</button>
+          <button className="report-btn primary" onClick={() => window.print()}>3장 보고서 인쇄 / PDF</button>
+          {authReady && (isAdmin
+            ? <button className="report-btn" onClick={handleAdminLogout}>로그아웃</button>
+            : <button
+                className="report-btn"
+                onClick={() => {
+                  window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+                }}
+              >
+                관리자 로그인
+              </button>)}
+        </div>
       </div>
 
       <section className="report-page">
@@ -195,8 +386,11 @@ export default function ReportPage() {
             <Metric label="용도지역" value={snapshot.primaryZone ?? "확인 필요"} />
             <Metric label="건폐율 상한" value={formatPercent(snapshot.statutoryBcrMaxPct ?? null)} />
             <Metric label="용적률 상한" value={formatPercent(snapshot.statutoryFarMaxPct ?? null)} />
-            <Metric label="공시지가 기준 토지가치" value={formatWon(officialLandValue)} />
-            <Metric label="연 토지사용료 1%" value={formatWon(analysis.annualLandFee)} />
+            <Metric label={`공시지가 기준 토지가치${landPriceYears.length ? ` (${landPriceYears.join("/")}년)` : ""}`} value={formatWon(officialLandValue)} />
+            <Metric label="연 토지사용료 5%" value={formatWon(analysis.annualLandFee)} />
+            <div className="report-source" style={{ marginTop: 8 }}>
+              {landPriceByPnu.size ? "국토교통부 개별공시지가정보 자동조회" : "공시지가 자동조회값 없음 — 확인 필요"}
+            </div>
           </div>
         </div>
         <div className="report-section"><div className="report-section-head"><div><span>PART 1</span><br /><strong>개발가능 규모</strong></div></div>
@@ -205,8 +399,13 @@ export default function ReportPage() {
             <tr><td className="left">지하 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.undergroundGfa)}</td>)}</tr>
             <tr><td className="left">총 공사 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.totalConstructionGfa)}</td>)}</tr>
           </tbody></table>
+          <div className="report-note" style={{ marginTop: 10 }}>
+            {basementReference?.ratioPct !== null && basementReference?.ratioPct !== undefined
+              ? `지하 GFA는 건축HUB 층별개요의 기존 건축물 참고비율 ${basementReference.ratioPct.toFixed(1)}%를 초기값으로 적용했습니다. 미래 계획 지하규모의 확정값이 아니며 직접 수정할 수 있습니다.`
+              : "건축HUB에서 유효한 지상·지하 층별 면적을 찾지 못해 지하 비율은 자동 추정하지 않았습니다."}
+          </div>
         </div>
-        <div className="report-section no-print"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
+        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
           <div className="report-form-grid">
             <Field label="지하/지상 비율 %" value={assumptions.basementRatioPct} onChange={(v) => setAssumption("basementRatioPct", v)} />
             <Field label="표준공사비 원/㎡" value={assumptions.constructionCostPerSqm} onChange={(v) => setAssumption("constructionCostPerSqm", v)} />
@@ -230,7 +429,7 @@ export default function ReportPage() {
           <div className="report-card"><h3>소유권 Gate</h3><Metric label="판정" value={ownershipGate} />{records.map((row, i) => <div className="report-owner-row" key={`${row.pnu}-${i}`}><strong>{row.ownerTypeLabel} · {row.ownerClass}</strong><span>{row.legalDong} {row.jibun}</span></div>)}</div>
           <div className="report-card"><h3>협의대상자</h3><p>1차 · 토지 소유기관</p><p>2차 · 재산관리관·관리권자·운영주체</p><p>3차 · 관리·처분·개발 의사결정권자</p><div className="report-warning">공개 소유정보로 실제 기관명·재산관리관이 확정되지 않으면 “확인 필요”로 유지합니다.</div></div>
         </div>
-        <div className="report-section no-print"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
+        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
           <div className="report-demand-grid"><Field label="PUBLIC Required GFA ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
         </div>
         <div className="report-section"><div className="report-section-head"><div><span>DEMAND FIT</span><br /><strong>개발가능 면적 vs 수요시설 면적</strong></div></div>
@@ -245,16 +444,16 @@ export default function ReportPage() {
       <section className="report-page">
         <div className="report-kicker">03 · PPP FEASIBILITY / GO-NO GO</div>
         <h2 className="report-title">사업성 매트릭스와 추진여부</h2>
-        <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 1% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
+        <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 5% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
         <div className="report-grid three">
           <div className="report-card"><h3>토지</h3><Metric label="토지가치" value={formatWon(officialLandValue)} /><Metric label="연 사용료" value={formatWon(analysis.annualLandFee)} /></div>
-          <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
-          <div className="report-card"><h3>REITs</h3><Metric label="PASS" value="Project IRR ≥ 6.0%" /><Metric label="출자자 요구" value={assumptions.investorRequiredReturnPct ? `${assumptions.investorRequiredReturnPct}%` : "별도 입력"} /></div>
+          <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="CONDITIONAL" value="1.00 ≤ Min DSCR < 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
+          <div className="report-card"><h3>REITs</h3><Metric label="PASS" value="Project IRR ≥ 6.5%" /><Metric label="CONDITIONAL" value="4.50% ≤ IRR < 6.5%" /><Metric label="출자자 요구" value={assumptions.investorRequiredReturnPct ? `${assumptions.investorRequiredReturnPct}%` : "별도 입력"} /></div>
         </div>
         <div className="report-section"><div className="report-section-head"><div><span>BTO / BOT</span><br /><strong>Minimum DSCR Matrix</strong></div></div><Matrix mode="BTO" analysis={analysis} /></div>
         <div className="report-section"><div className="report-section-head"><div><span>REITs</span><br /><strong>Project IRR Matrix</strong></div></div><Matrix mode="REITS" analysis={analysis} /></div>
         <div className="report-section report-verdict"><span className={`report-status ${statusTone(finalDecision.status)}`}>{finalDecision.status}</span><strong>{finalDecision.title}</strong><p>{finalDecision.text}</p>{recommendation && <p><b>우선 검토:</b> {recommendation.scenarioLabel} / {recommendation.term}년 · BTO/BOT {recommendation.btoBotStatus} · REITs {recommendation.reitsStatus}</p>}</div>
-        <div className="report-note">실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing, 실제 임대료·OPEX·금리·Lifecycle CAPEX를 반영해 확정합니다. REITs의 6%는 INRealtyLab 내부 Project IRR 판정기준입니다.</div>
+        <div className="report-note">실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing, 실제 임대료·OPEX·금리·Lifecycle CAPEX를 반영해 확정합니다. REITs의 6.5%는 INRealtyLab 내부 Project IRR 판정기준(공통 목표수익률)이며, DSCR·IRR 중 하나라도 CONDITIONAL/FAIL이면 종합판정도 그에 따라 조건부 가능/불가로 표시됩니다.</div>
         <div className="report-page-number">3 / 3</div>
       </section>
     </main>

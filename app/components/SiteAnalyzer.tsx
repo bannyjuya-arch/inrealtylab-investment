@@ -51,6 +51,42 @@ type RegulationData = {
   layerErrors: Array<{ layer: string; label: string; message: string }>;
 };
 
+type AllowedUseDecision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
+
+type AllowedUseFacility = {
+  key: string;
+  label: string;
+  group: string;
+  decision: AllowedUseDecision;
+  reason: string;
+  confidence: number;
+  activityCode: string | null;
+  activityName: string | null;
+  evidence: Array<{
+    activityName: string;
+    decisionRaw: string;
+    condition: string | null;
+    legalBasis: string | null;
+    confidence: number;
+  }>;
+};
+
+type AllowedUseData = {
+  facilities: AllowedUseFacility[];
+  diagnostics: {
+    activityCatalogCount: number;
+    matchedFacilityCount: number;
+  };
+  source: {
+    code: string;
+    name: string;
+    endpoints: string[];
+    baseDate: string;
+    queriedAt: string;
+    note: string;
+  };
+};
+
 function ensureOpenLayers(): Promise<any> {
   if (typeof window === "undefined") return Promise.reject(new Error("browser only"));
   if ((window as any).ol) return Promise.resolve((window as any).ol);
@@ -112,21 +148,38 @@ function formatArea(value: number) {
   return `${Math.round(value).toLocaleString("ko-KR")}㎡`;
 }
 
+function decisionLabel(decision: AllowedUseDecision) {
+  if (decision === "ALLOWED") return "가능";
+  if (decision === "CONDITIONAL") return "조건부";
+  if (decision === "PROHIBITED") return "불가";
+  return "추가확인";
+}
+
+function decisionTone(decision: AllowedUseDecision): "ok" | "pending" | "warn" | "neutral" {
+  if (decision === "ALLOWED") return "ok";
+  if (decision === "CONDITIONAL" || decision === "PROHIBITED") return "warn";
+  if (decision === "REVIEW") return "pending";
+  return "neutral";
+}
+
 export default function SiteAnalyzer() {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const selectedSourceRef = useRef<any>(null);
   const olRef = useRef<any>(null);
 
-  const [query, setQuery] = useState("서울특별시 성동구 행당동");
+  const [query, setQuery] = useState("");
   const [message, setMessage] = useState("지도에서 분석할 필지를 선택하세요.");
   const [loading, setLoading] = useState(false);
   const [cadastreVisible, setCadastreVisible] = useState(true);
   const [parcels, setParcels] = useState<SelectedParcel[]>([]);
-  const [activeTab, setActiveTab] = useState<"SITE" | "REGULATION" | "CAPACITY">("SITE");
+  const [activeTab, setActiveTab] = useState<"SITE" | "REGULATION" | "USE" | "CAPACITY">("SITE");
   const [regulation, setRegulation] = useState<RegulationData | null>(null);
   const [regulationLoading, setRegulationLoading] = useState(false);
   const [regulationError, setRegulationError] = useState("");
+  const [allowedUse, setAllowedUse] = useState<AllowedUseData | null>(null);
+  const [allowedUseLoading, setAllowedUseLoading] = useState(false);
+  const [allowedUseError, setAllowedUseError] = useState("");
 
   const totalArea = useMemo(
     () => parcels.reduce((sum, parcel) => sum + parcel.areaSqm, 0),
@@ -264,12 +317,19 @@ export default function SiteAnalyzer() {
 
   useEffect(() => {
     if (!parcels.length) {
+      setQuery("");
       setRegulation(null);
       setRegulationError("");
+      setAllowedUse(null);
+      setAllowedUseError("");
       setActiveTab("SITE");
     } else {
+      const representative = parcels[0];
+      setQuery([representative.legalDong, representative.jibun].filter(Boolean).join(" "));
       setRegulation(null);
       setRegulationError("");
+      setAllowedUse(null);
+      setAllowedUseError("");
     }
   }, [parcels]);
 
@@ -367,30 +427,74 @@ export default function SiteAnalyzer() {
     }
   }
 
+  async function fetchRegulationData() {
+    if (!parcels.length) throw new Error("먼저 필지를 선택하세요.");
+    const center = getRawFeatureCenter(parcels[0].feature);
+    if (!center) throw new Error("선택 필지의 중심 좌표를 계산하지 못했습니다.");
+
+    const response = await fetch(
+      `/api/regulation?lon=${encodeURIComponent(center.lon)}&lat=${encodeURIComponent(center.lat)}&pnu=${encodeURIComponent(parcels[0].pnu)}`
+    );
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회에 실패했습니다.");
+    return data.regulation as RegulationData;
+  }
+
   async function loadRegulation(nextTab: "REGULATION" | "CAPACITY") {
     if (!parcels.length) return;
     setActiveTab(nextTab);
     if (regulation || regulationLoading) return;
 
-    const center = getRawFeatureCenter(parcels[0].feature);
-    if (!center) {
-      setRegulationError("선택 필지의 중심 좌표를 계산하지 못했습니다.");
-      return;
-    }
-
     setRegulationLoading(true);
     setRegulationError("");
     try {
-      const response = await fetch(
-        `/api/regulation?lon=${encodeURIComponent(center.lon)}&lat=${encodeURIComponent(center.lat)}&pnu=${encodeURIComponent(parcels[0].pnu)}`
-      );
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회에 실패했습니다.");
-      setRegulation(data.regulation);
+      const nextRegulation = await fetchRegulationData();
+      setRegulation(nextRegulation);
     } catch (error) {
       setRegulationError(error instanceof Error ? error.message : "규제정보 조회에 실패했습니다.");
     } finally {
       setRegulationLoading(false);
+    }
+  }
+
+  async function loadAllowedUse() {
+    if (!parcels.length) return;
+    setActiveTab("USE");
+    if (allowedUse || allowedUseLoading) return;
+
+    setAllowedUseLoading(true);
+    setAllowedUseError("");
+    try {
+      let currentRegulation = regulation;
+      if (!currentRegulation) {
+        setRegulationLoading(true);
+        currentRegulation = await fetchRegulationData();
+        setRegulation(currentRegulation);
+        setRegulationLoading(false);
+      }
+
+      const zoneName = currentRegulation.primaryZone ?? currentRegulation.useZones[0]?.name ?? "";
+      const legalGfa = currentRegulation.statutoryLimit
+        ? totalArea * (currentRegulation.statutoryLimit.farMax / 100)
+        : null;
+      const gfaParam = legalGfa && legalGfa > 0
+        ? `&aboveGroundGfaSqm=${encodeURIComponent(legalGfa)}`
+        : "";
+      const response = await fetch(
+        `/api/allowed-use?pnu=${encodeURIComponent(parcels[0].pnu)}&zoneName=${encodeURIComponent(zoneName)}&scenarioCode=BASE${gfaParam}`
+      );
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data?.message ?? data?.error ?? "건축 가능시설 조회에 실패했습니다.");
+      setAllowedUse({
+        facilities: data.facilities ?? [],
+        diagnostics: data.diagnostics,
+        source: data.source,
+      });
+    } catch (error) {
+      setRegulationLoading(false);
+      setAllowedUseError(error instanceof Error ? error.message : "건축 가능시설 조회에 실패했습니다.");
+    } finally {
+      setAllowedUseLoading(false);
     }
   }
 
@@ -415,7 +519,7 @@ export default function SiteAnalyzer() {
           <h1>대지를 선택하면 분석이 시작됩니다.</h1>
           <p>지도에서 실제 지적 필지를 지정하고 PNU와 대지면적을 확보하는 첫 단계입니다.</p>
         </div>
-        <div className="beta-chip">CORE v0.4</div>
+        <div className="beta-chip">CORE v0.5</div>
       </header>
 
       <form className="map-search" onSubmit={handleSearch}>
@@ -450,6 +554,7 @@ export default function SiteAnalyzer() {
           <div className="analysis-tabs">
             <button className={activeTab === "SITE" ? "active" : ""} onClick={() => setActiveTab("SITE")}>SITE</button>
             <button className={activeTab === "REGULATION" ? "active" : ""} disabled={!parcels.length} onClick={() => loadRegulation("REGULATION")}>REGULATION</button>
+            <button className={activeTab === "USE" ? "active" : ""} disabled={!parcels.length} onClick={loadAllowedUse}>USE</button>
             <button className={activeTab === "CAPACITY" ? "active" : ""} disabled={!parcels.length} onClick={() => loadRegulation("CAPACITY")}>CAPACITY</button>
           </div>
 
@@ -538,9 +643,56 @@ export default function SiteAnalyzer() {
 
                   <div className="next-step-card">
                     <span>NEXT</span>
+                    <strong>건축 가능시설</strong>
+                    <p>선택 필지의 시군구와 용도지역을 기준으로 토지이용행위 가능여부를 조회해 가능·조건부·불가·추가확인으로 표시합니다.</p>
+                    <button type="button" onClick={loadAllowedUse}>USE 보기</button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {activeTab === "USE" && (
+            <div className="regulation-view">
+              <div className="section-title-row">
+                <div><span>USE</span><strong>건축 가능시설</strong></div>
+                {allowedUseLoading && <small>공공데이터 조회 중...</small>}
+              </div>
+
+              {allowedUseError && <div className="analysis-alert error">{allowedUseError}</div>}
+              {!allowedUse && !allowedUseLoading && !allowedUseError && <div className="empty-site">건축 가능시설 정보를 불러오지 못했습니다.</div>}
+
+              {allowedUse && (
+                <>
+                  <div className="metric-grid">
+                    <div><span>기준 용도지역</span><strong>{regulation?.primaryZone ?? "추가확인"}</strong></div>
+                    <div><span>행위코드 매칭</span><strong>{allowedUse.diagnostics.matchedFacilityCount}/{allowedUse.facilities.length}</strong></div>
+                    <div><span>기준일</span><strong>{allowedUse.source.baseDate}</strong></div>
+                  </div>
+
+                  <AllowedUseGroup title="업무시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "OFFICE")} />
+                  <AllowedUseGroup title="판매·근린생활시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "RETAIL")} />
+                  <AllowedUseGroup title="기타 수익시설" facilities={allowedUse.facilities.filter((facility) => !["OFFICE", "RETAIL", "PUBLIC"].includes(facility.group))} />
+                  <AllowedUseGroup title="공공·필수시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "PUBLIC")} />
+
+                  <div className="source-note">
+                    <strong>{allowedUse.source.name}</strong>
+                    <span>기준일 {allowedUse.source.baseDate} · {allowedUse.source.endpoints.join(" + ")}</span>
+                    <p>{allowedUse.source.note}</p>
+                  </div>
+
+                  {regulation?.districtPlans.length ? (
+                    <div className="analysis-alert">지구단위계획구역이 중첩되어 있습니다. 여기의 행위제한 1차 판정 외에 지구단위계획 결정도서의 허용용도·불허용도를 반드시 추가 확인해야 합니다.</div>
+                  ) : null}
+                  {parcels.length > 1 && (
+                    <div className="analysis-alert error">현재 USE 판정은 대표 필지 1개 기준입니다. 복수 필지의 용도지역이 다른 경우 필지별 판정으로 확장해야 합니다.</div>
+                  )}
+
+                  <div className="next-step-card">
+                    <span>NEXT</span>
                     <strong>개발가능 규모</strong>
-                    <p>확인된 대지면적과 규제값을 기준으로 사업검토·법정최대 규모를 계산하고 규칙 반영 상태를 확인합니다.</p>
-                    <button type="button" onClick={() => setActiveTab("CAPACITY")}>CAPACITY 보기</button>
+                    <p>무엇을 지을 수 있는지 확인한 뒤, 대지면적과 건폐율·용적률을 기준으로 개발가능 규모를 계산합니다.</p>
+                    <button type="button" onClick={() => loadRegulation("CAPACITY")}>CAPACITY 보기</button>
                   </div>
                 </>
               )}
@@ -611,6 +763,7 @@ export default function SiteAnalyzer() {
                   <div className="capacity-status-list">
                     <CapacityStatus label="대지면적 / PNU" status="반영" tone="ok" detail="VWorld 지적 필지" />
                     <CapacityStatus label="용도지역" status="반영" tone="ok" detail={regulation.primaryZone ?? "세부지역 확인 필요"} />
+                    <CapacityStatus label="건축 가능시설" status={allowedUse ? "조회" : "미조회"} tone={allowedUse ? "ok" : "pending"} detail={allowedUse ? "국토교통부 토지이용규제정보서비스" : "USE 단계에서 조회"} />
                     <CapacityStatus label="국가 건폐율·용적률" status="반영" tone="ok" detail={regulation.statutoryLimit.legalBasis} />
                     <CapacityStatus label="지자체 조례" status="미반영" tone="pending" detail="조례 Rule DB 연결 예정" />
                     <CapacityStatus
@@ -623,7 +776,7 @@ export default function SiteAnalyzer() {
                   </div>
 
                   {parcels.length > 1 && (
-                    <div className="analysis-alert error">현재 REGULATION/CAPACITY 규제값은 첫 번째 선택 필지의 중심점 기준입니다. 복수 필지가 서로 다른 용도지역에 걸치는 경우 필지별 규제 계산으로 확장해야 정확합니다.</div>
+                    <div className="analysis-alert error">현재 REGULATION/USE/CAPACITY는 첫 번째 선택 필지 기준입니다. 복수 필지가 서로 다른 용도지역에 걸치는 경우 필지별 규제·허용용도 계산으로 확장해야 정확합니다.</div>
                   )}
                   <div className="analysis-alert">단순 환산층수는 연면적 ÷ 건축면적의 기초 지표입니다. 실제 층수는 높이, 일조, 도로, 주차, 코어·공용부, 용적률 산입 제외면적, 지구단위계획 및 개별법 검토 후 달라집니다.</div>
                   <div className="analysis-alert">현재 CAPACITY에는 국가 법정상한만 자동 반영됩니다. 앞서 구축한 규정 DB에서 서울시 조례·고시·인센티브 규칙이 검토 후 ACTIVE가 되면 이 단계에서 적용기준과 산식을 덮어쓰도록 연결합니다.</div>
@@ -647,6 +800,29 @@ function RegulationGroup({ title, items }: { title: string; items: RegulationHit
         <ul>{items.map((item, index) => <li key={`${item.layer}-${item.name}-${index}`}><span>{item.name}</span><small>{item.label}</small></li>)}</ul>
       ) : (
         <p>중첩 없음</p>
+      )}
+    </section>
+  );
+}
+
+function AllowedUseGroup({ title, facilities }: { title: string; facilities: AllowedUseFacility[] }) {
+  return (
+    <section className="regulation-group">
+      <div className="regulation-group-head"><strong>{title}</strong><span>{facilities.length}개</span></div>
+      {facilities.length ? (
+        <div className="capacity-status-list">
+          {facilities.map((facility) => (
+            <CapacityStatus
+              key={facility.key}
+              label={facility.label}
+              status={decisionLabel(facility.decision)}
+              tone={decisionTone(facility.decision)}
+              detail={`${facility.activityName ?? "행위코드 추가확인"} · 신뢰도 ${Math.round(facility.confidence * 100)}% · ${facility.reason}`}
+            />
+          ))}
+        </div>
+      ) : (
+        <p>대상 시설 없음</p>
       )}
     </section>
   );
