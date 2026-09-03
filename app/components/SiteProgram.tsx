@@ -177,6 +177,15 @@ export default function SiteProgram() {
           if (!cancelled) {
             setAllowedUse({ facilities: data.facilities ?? [], diagnostics: data.diagnostics, source: data.source });
           }
+          // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설을 걸러낼 때 쓴다.
+          try {
+            const allowedKeys = (data.facilities ?? [])
+              .filter((facility: AllowedUseFacility) => facility.decision === "ALLOWED" || facility.decision === "CONDITIONAL")
+              .map((facility: AllowedUseFacility) => facility.key);
+            sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
+          } catch {
+            // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
+          }
         } catch (error) {
           if (!cancelled) setAllowedUseError(error instanceof Error ? error.message : "건축 가능시설 조회에 실패했습니다.");
         }

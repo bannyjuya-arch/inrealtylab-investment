@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import PublicAssetDetails from "./PublicAssetDetails";
 import SiteProgram from "../components/SiteProgram";
+import StructureChoice from "../components/StructureChoice";
+import ProgramChoice from "../components/ProgramChoice";
 import "./control.css";
 
 type Gate = {
@@ -258,6 +260,12 @@ export default function ControlPage() {
 
           {/* 2026-09-03: 기존 Part 1의 REGULATION·USE·CAPACITY를 STEP 2로 이관 */}
           <SiteProgram />
+
+          {/* 2026-09-03: 사업방식·사업주체 두 축 선택 */}
+          <StructureChoice />
+
+          {/* 2026-09-03: 시설 구성 — 1차 제안 후 사용자 수정 */}
+          <ProgramChoice />
 
           <section className="control-section">
             <div className="control-section-title">
