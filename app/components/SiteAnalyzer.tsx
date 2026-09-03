@@ -211,6 +211,9 @@ export default function SiteAnalyzer() {
   const [allowedUseLoading, setAllowedUseLoading] = useState(false);
   const [allowedUseError, setAllowedUseError] = useState("");
   const [ownershipByPnu, setOwnershipByPnu] = useState<Record<string, ParcelOwnership>>({});
+  // 이미 조회를 건 PNU. state로 추적하면 effect가 자기 자신을 다시 트리거해
+  // 진행 중이던 요청을 취소해버리므로 ref로 둔다.
+  const requestedOwnershipRef = useRef<Set<string>>(new Set());
 
   const totalArea = useMemo(
     () => parcels.reduce((sum, parcel) => sum + parcel.areaSqm, 0),
@@ -307,7 +310,7 @@ export default function SiteAnalyzer() {
             if (sector === "PRIVATE") {
               return new ol.style.Style({
                 stroke: new ol.style.Stroke({ color: "#9DA09E", width: 2, lineDash: [6, 4] }),
-                fill: new ol.style.Fill({ color: "rgba(38, 41, 43, 0.04)" }),
+                fill: new ol.style.Fill({ color: "rgba(0, 0, 0, 0)" }),
               });
             }
             if (sector === "PUBLIC") {
@@ -316,9 +319,11 @@ export default function SiteAnalyzer() {
                 fill: new ol.style.Fill({ color: "rgba(62, 125, 101, 0.5)" }),
               });
             }
+            // 소유구분이 아직 확인되지 않은 상태. 국공유로 확인되기 전에는
+            // 초록을 얹지 않는다 — 확인 전 필지가 국공유지처럼 보이면 안 된다.
             return new ol.style.Style({
-              stroke: new ol.style.Stroke({ color: "#7FAE97", width: 2.5 }),
-              fill: new ol.style.Fill({ color: "rgba(168, 203, 187, 0.45)" }),
+              stroke: new ol.style.Stroke({ color: "#C3CCC7", width: 2 }),
+              fill: new ol.style.Fill({ color: "rgba(38, 41, 43, 0.03)" }),
             });
           },
         });
@@ -386,8 +391,10 @@ export default function SiteAnalyzer() {
   useEffect(() => {
     const pending = parcels
       .map((parcel) => parcel.pnu)
-      .filter((pnu) => /^\d{19}$/.test(pnu) && !ownershipByPnu[pnu]);
+      .filter((pnu) => /^\d{19}$/.test(pnu) && !requestedOwnershipRef.current.has(pnu));
     if (!pending.length) return;
+
+    for (const pnu of pending) requestedOwnershipRef.current.add(pnu);
 
     setOwnershipByPnu((current) => {
       const next = { ...current };
@@ -396,8 +403,6 @@ export default function SiteAnalyzer() {
       }
       return next;
     });
-
-    let cancelled = false;
 
     (async () => {
       for (const pnu of pending) {
@@ -425,17 +430,12 @@ export default function SiteAnalyzer() {
           };
         }
 
-        if (cancelled) return;
         setOwnershipByPnu((current) => ({ ...current, [pnu]: resolved }));
         // 지도 폴리곤 색을 소유구분에 맞춰 다시 칠한다.
         selectedSourceRef.current?.getFeatureById(pnu)?.set("ownerSector", resolved.sector);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [parcels, ownershipByPnu]);
+  }, [parcels]);
 
   const siteOwnership = useMemo<SiteOwnership | null>(() => {
     if (!parcels.length) return null;
