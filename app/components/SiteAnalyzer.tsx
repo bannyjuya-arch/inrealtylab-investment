@@ -162,6 +162,36 @@ function decisionTone(decision: AllowedUseDecision): "ok" | "pending" | "warn" |
   return "neutral";
 }
 
+// 2026-09-03 확정: STEP 1은 "토지의 종류"만 가린다.
+// 국공유지냐 민간이냐를 여기서 판정하고, 민간이면 이후 단계로 넘기지 않는다.
+// (행정재산/일반재산 공식 구분은 VWorld 토지소유정보만으로 확정되지 않아 STEP 2에서 다룬다.)
+type OwnerSector = "PUBLIC" | "PRIVATE" | "UNKNOWN";
+
+type OwnershipApiRecord = {
+  pnu: string;
+  ownerClass: string;
+  ownerSector: OwnerSector;
+  ownerTypeLabel: string;
+};
+
+type ParcelOwnership = {
+  status: "LOADING" | "DONE" | "ERROR";
+  sector: OwnerSector;
+  ownerClass: string;
+  label: string;
+  message?: string;
+};
+
+type SiteOwnership = "LOADING" | "PUBLIC" | "PRIVATE" | "UNKNOWN";
+
+function ownershipText(state: ParcelOwnership | undefined) {
+  if (!state) return "조회 대기";
+  if (state.status === "LOADING") return "조회 중...";
+  if (state.sector === "PUBLIC") return `${state.label} · ${state.ownerClass}`;
+  if (state.sector === "PRIVATE") return `민간 · ${state.ownerClass}`;
+  return state.message ? `확인 필요 (${state.message})` : "확인 필요";
+}
+
 export default function SiteAnalyzer() {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
@@ -180,6 +210,7 @@ export default function SiteAnalyzer() {
   const [allowedUse, setAllowedUse] = useState<AllowedUseData | null>(null);
   const [allowedUseLoading, setAllowedUseLoading] = useState(false);
   const [allowedUseError, setAllowedUseError] = useState("");
+  const [ownershipByPnu, setOwnershipByPnu] = useState<Record<string, ParcelOwnership>>({});
 
   const totalArea = useMemo(
     () => parcels.reduce((sum, parcel) => sum + parcel.areaSqm, 0),
@@ -267,12 +298,29 @@ export default function SiteAnalyzer() {
         });
         cadastralLayer.set("layerName", "cadastre");
 
+        // 2026-09-03 확정 색 체계: 국공유지에만 색을 얹고 민간은 칠하지 않는다.
+        // 배경 지도를 덮지 않아야 도로·지번이 그대로 읽힌다.
         const selectedLayer = new ol.layer.Vector({
           source: selectedSource,
-          style: new ol.style.Style({
-            stroke: new ol.style.Stroke({ color: "#0f62fe", width: 3 }),
-            fill: new ol.style.Fill({ color: "rgba(15, 98, 254, 0.18)" }),
-          }),
+          style: (feature: any) => {
+            const sector = feature.get("ownerSector");
+            if (sector === "PRIVATE") {
+              return new ol.style.Style({
+                stroke: new ol.style.Stroke({ color: "#9DA09E", width: 2, lineDash: [6, 4] }),
+                fill: new ol.style.Fill({ color: "rgba(38, 41, 43, 0.04)" }),
+              });
+            }
+            if (sector === "PUBLIC") {
+              return new ol.style.Style({
+                stroke: new ol.style.Stroke({ color: "#14453A", width: 3.5 }),
+                fill: new ol.style.Fill({ color: "rgba(62, 125, 101, 0.5)" }),
+              });
+            }
+            return new ol.style.Style({
+              stroke: new ol.style.Stroke({ color: "#7FAE97", width: 2.5 }),
+              fill: new ol.style.Fill({ color: "rgba(168, 203, 187, 0.45)" }),
+            });
+          },
         });
 
         const map = new ol.Map({
@@ -332,6 +380,74 @@ export default function SiteAnalyzer() {
       setAllowedUseError("");
     }
   }, [parcels]);
+
+  // 필지를 고르는 즉시 소유구분을 조회한다. Part 2까지 갔다가 튕기지 않도록
+  // 판정 지점을 STEP 1으로 앞당긴 것이다(2026-09-03 확정).
+  useEffect(() => {
+    const pending = parcels
+      .map((parcel) => parcel.pnu)
+      .filter((pnu) => /^\d{19}$/.test(pnu) && !ownershipByPnu[pnu]);
+    if (!pending.length) return;
+
+    setOwnershipByPnu((current) => {
+      const next = { ...current };
+      for (const pnu of pending) {
+        next[pnu] = { status: "LOADING", sector: "UNKNOWN", ownerClass: "", label: "조회 중" };
+      }
+      return next;
+    });
+
+    let cancelled = false;
+
+    (async () => {
+      for (const pnu of pending) {
+        let resolved: ParcelOwnership;
+        try {
+          const response = await fetch(`/api/ownership?pnu=${encodeURIComponent(pnu)}`, { cache: "no-store" });
+          const data = await response.json();
+          const record: OwnershipApiRecord | undefined = data?.records?.[0];
+          resolved = record
+            ? { status: "DONE", sector: record.ownerSector, ownerClass: record.ownerClass, label: record.ownerTypeLabel }
+            : {
+                status: "ERROR",
+                sector: "UNKNOWN",
+                ownerClass: "",
+                label: "확인 필요",
+                message: data?.message ?? "소유정보를 찾지 못했습니다.",
+              };
+        } catch (error) {
+          resolved = {
+            status: "ERROR",
+            sector: "UNKNOWN",
+            ownerClass: "",
+            label: "확인 필요",
+            message: error instanceof Error ? error.message : "소유정보 조회 실패",
+          };
+        }
+
+        if (cancelled) return;
+        setOwnershipByPnu((current) => ({ ...current, [pnu]: resolved }));
+        // 지도 폴리곤 색을 소유구분에 맞춰 다시 칠한다.
+        selectedSourceRef.current?.getFeatureById(pnu)?.set("ownerSector", resolved.sector);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [parcels, ownershipByPnu]);
+
+  const siteOwnership = useMemo<SiteOwnership | null>(() => {
+    if (!parcels.length) return null;
+    const states = parcels.map((parcel) => ownershipByPnu[parcel.pnu]);
+    if (states.some((state) => !state || state.status === "LOADING")) return "LOADING";
+    if (states.some((state) => state?.sector === "PRIVATE")) return "PRIVATE";
+    if (states.every((state) => state?.sector === "PUBLIC")) return "PUBLIC";
+    return "UNKNOWN";
+  }, [parcels, ownershipByPnu]);
+
+  // 민간소유가 하나라도 섞이면 다음 단계로 넘기지 않는다.
+  const analysisBlocked = siteOwnership === "PRIVATE";
 
   async function fetchParcel(lon: number, lat: number) {
     const response = await fetch(`/api/cadastre?lon=${encodeURIComponent(lon)}&lat=${encodeURIComponent(lat)}`);
@@ -553,9 +669,9 @@ export default function SiteAnalyzer() {
         <aside className="analysis-panel">
           <div className="analysis-tabs">
             <button className={activeTab === "SITE" ? "active" : ""} onClick={() => setActiveTab("SITE")}>SITE</button>
-            <button className={activeTab === "REGULATION" ? "active" : ""} disabled={!parcels.length} onClick={() => loadRegulation("REGULATION")}>REGULATION</button>
-            <button className={activeTab === "USE" ? "active" : ""} disabled={!parcels.length} onClick={loadAllowedUse}>USE</button>
-            <button className={activeTab === "CAPACITY" ? "active" : ""} disabled={!parcels.length} onClick={() => loadRegulation("CAPACITY")}>CAPACITY</button>
+            <button className={activeTab === "REGULATION" ? "active" : ""} disabled={!parcels.length || analysisBlocked} onClick={() => loadRegulation("REGULATION")}>REGULATION</button>
+            <button className={activeTab === "USE" ? "active" : ""} disabled={!parcels.length || analysisBlocked} onClick={loadAllowedUse}>USE</button>
+            <button className={activeTab === "CAPACITY" ? "active" : ""} disabled={!parcels.length || analysisBlocked} onClick={() => loadRegulation("CAPACITY")}>CAPACITY</button>
           </div>
 
           {activeTab === "SITE" && (
@@ -569,6 +685,15 @@ export default function SiteAnalyzer() {
                 <strong>{totalArea.toLocaleString("ko-KR")}㎡</strong>
                 <small>{(totalArea / 3.305785).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</small>
               </div>
+
+              {siteOwnership && (
+                <div className={`analysis-alert${siteOwnership === "PRIVATE" ? " error" : ""}`}>
+                  {siteOwnership === "LOADING" && "토지 소유정보를 조회하고 있습니다..."}
+                  {siteOwnership === "PUBLIC" && "국공유지입니다. 다음 단계로 진행할 수 있습니다. 행정재산·일반재산 구분은 다음 단계에서 확인합니다."}
+                  {siteOwnership === "UNKNOWN" && "소유구분을 확정하지 못했습니다. 등기·공부를 확인한 뒤 진행하세요."}
+                  {siteOwnership === "PRIVATE" && "민간소유 필지가 포함되어 있습니다. 인리얼티는 국공유지만 분석합니다 — 해당 필지를 제거하거나 인접한 국공유지를 선택하세요."}
+                </div>
+              )}
 
               <div className="parcel-list">
                 {parcels.length === 0 ? (
@@ -589,18 +714,28 @@ export default function SiteAnalyzer() {
                         <div><dt>지번</dt><dd>{parcel.jibun}</dd></div>
                         <div><dt>지목</dt><dd>{parcel.jimok}</dd></div>
                         <div><dt>면적</dt><dd>{parcel.areaSqm.toLocaleString("ko-KR")}㎡</dd></div>
+                        <div><dt>소유</dt><dd>{ownershipText(ownershipByPnu[parcel.pnu])}</dd></div>
                       </dl>
                     </article>
                   ))
                 )}
               </div>
 
-              <div className="next-step-card">
-                <span>NEXT</span>
-                <strong>법적 규제 분석</strong>
-                <p>선택된 PNU를 기준으로 용도지역·지구·구역과 국가 법정 건폐율·용적률 범위를 조회합니다.</p>
-                <button type="button" disabled={!parcels.length} onClick={() => loadRegulation("REGULATION")}>REGULATION 보기</button>
-              </div>
+              {analysisBlocked ? (
+                <div className="next-step-card">
+                  <span>대상 아님</span>
+                  <strong>국공유지가 아닙니다</strong>
+                  <p>인리얼티는 매입 없이 개발하는 비소유형 구조를 다루기 때문에 민간소유 필지는 분석하지 않습니다. 위 목록에서 민간 필지를 제거하고 인접한 국공유지를 지도에서 선택해 주세요.</p>
+                  <button type="button" onClick={clearSelection}>선택 초기화</button>
+                </div>
+              ) : (
+                <div className="next-step-card">
+                  <span>NEXT</span>
+                  <strong>법적 규제 분석</strong>
+                  <p>선택된 PNU를 기준으로 용도지역·지구·구역과 국가 법정 건폐율·용적률 범위를 조회합니다.</p>
+                  <button type="button" disabled={!parcels.length || siteOwnership === "LOADING"} onClick={() => loadRegulation("REGULATION")}>REGULATION 보기</button>
+                </div>
+              )}
             </>
           )}
 

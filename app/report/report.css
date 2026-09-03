@@ -1,1 +1,147 @@
-.report-shell{max-width:1280px;margin:0 auto;padding:28px 20px 60px;font-family:Arial,"Noto Sans KR",sans-serif;color:#121826;background:#f4f6f8}.report-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:18px}.report-toolbar-actions{display:flex;gap:8px}.report-btn{border:1px solid #c9d0d8;background:#fff;color:#17202a;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer}.report-btn.primary{background:#111827;color:#fff;border-color:#111827}.report-page{background:#fff;min-height:1120px;margin:0 auto 22px;padding:34px 38px;box-shadow:0 10px 30px rgba(15,23,42,.08);border:1px solid #e6e9ee;position:relative}.report-page-number{position:absolute;right:38px;bottom:24px;color:#7b8794;font-size:12px}.report-kicker{font-size:12px;letter-spacing:.12em;font-weight:800;color:#40566d}.report-title{font-size:30px;line-height:1.15;margin:8px 0 6px}.report-subtitle{color:#607080;margin:0 0 24px;font-size:14px}.report-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.report-grid.three{grid-template-columns:repeat(3,1fr)}.report-card{border:1px solid #e0e5ea;border-radius:12px;padding:16px;background:#fff}.report-card h3{margin:0 0 10px;font-size:16px}.report-card p{margin:6px 0;color:#536170;line-height:1.55}.report-metric{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid #edf0f2}.report-metric:last-child{border-bottom:0}.report-metric span{color:#667585;font-size:13px}.report-metric strong{text-align:right}.report-section{margin-top:22px}.report-section-head{display:flex;justify-content:space-between;align-items:end;margin-bottom:10px}.report-section-head span{font-size:11px;letter-spacing:.1em;color:#6c7a89;font-weight:800}.report-section-head strong{font-size:19px}.report-table{width:100%;border-collapse:collapse;font-size:12px}.report-table th,.report-table td{border:1px solid #dfe4e9;padding:8px 9px;text-align:center;vertical-align:middle}.report-table th{background:#f6f8fa;font-weight:800}.report-table td.left{text-align:left}.report-note{margin-top:10px;padding:11px 13px;border-radius:8px;background:#f6f8fa;color:#536170;font-size:12px;line-height:1.5}.report-status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-weight:800;font-size:11px}.report-status.pass{background:#eaf7ef;color:#17633a}.report-status.strong{background:#e7f1ff;color:#134f9b}.report-status.conditional{background:#fff1e0;color:#a15c00}.report-status.fail{background:#fdecec;color:#9f2626}.report-status.review{background:#fff6db;color:#7c5d00}.report-status.fit{background:#eaf7ef;color:#17633a}.report-status.short{background:#fdecec;color:#9f2626}.report-status.excess{background:#fff6db;color:#7c5d00}.report-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.report-field{display:flex;flex-direction:column;gap:5px}.report-field label{font-size:11px;color:#677586;font-weight:800}.report-field input,.report-field select{width:100%;box-sizing:border-box;border:1px solid #cfd6dd;border-radius:7px;padding:8px 9px;background:#fff}.report-field input[type=range]{padding:0}.report-demand-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.report-verdict{border:2px solid #1d4ed8;border-radius:14px;padding:18px;background:#f7faff}.report-verdict strong{font-size:22px;display:block;margin-bottom:6px}.report-verdict p{margin:4px 0;line-height:1.55}.report-source{font-size:11px;color:#7b8794;line-height:1.5}.report-warning{border-left:3px solid #d79b00;padding:8px 11px;background:#fff9e8;color:#6e570f;font-size:12px;margin-top:8px}.report-map-placeholder{min-height:260px;border-radius:12px;border:1px dashed #aab4be;background:linear-gradient(135deg,#f7f9fb,#edf2f7);display:flex;align-items:center;justify-content:center;text-align:center;color:#667585;padding:20px}.report-map-placeholder strong{display:block;color:#263544;margin-bottom:6px}.report-owner-list{display:grid;gap:8px}.report-owner-row{padding:10px;border:1px solid #e1e6eb;border-radius:8px}.report-owner-row strong{display:block;margin-bottom:3px}.report-footer-note{margin-top:18px;font-size:10px;color:#89939f;line-height:1.45}.matrix-value{font-weight:800;display:block;margin-bottom:4px}.matrix-sub{font-size:10px;color:#6c7885}.no-print{display:block}.report-shell:not(.is-admin) .admin-only{display:none}@media print{body{background:#fff!important}.no-print{display:none!important}.report-shell{padding:0;background:#fff;max-width:none}.report-page{width:210mm;min-height:297mm;height:297mm;padding:14mm 14mm 12mm;margin:0;box-shadow:none;border:0;page-break-after:always;overflow:hidden}.report-page:last-child{page-break-after:auto}.report-title{font-size:23px}.report-section{margin-top:14px}.report-card{padding:10px}.report-table th,.report-table td{padding:5px 6px;font-size:10px}.report-note,.report-warning{font-size:10px}.report-page-number{right:14mm;bottom:8mm}.report-form-grid,.report-demand-grid{gap:5px}.report-field input,.report-field select{padding:5px 6px;font-size:10px}}
+/* INRealtyLab 보고서 — 그린코랄 디자인 시스템
+   구조 딥그린 #14453A · 보조 그린 #3E7D65 · 라이트 세이지 #A8CBBB
+   본문 잉크 #26292B · 보조 텍스트 #5F6260 · 뮤트 #9DA09E · 경계 #E4E8E6
+   포인트 코랄 #E0512A(라이트 바탕) / #FC7B57(다크 바탕) — 텍스트 강조 전용, 면 채움 금지 */
+
+.report-shell {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 20px 60px;
+  font-family: 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+  color: #26292B;
+  background: #F6F8F7;
+  -webkit-font-smoothing: antialiased;
+}
+
+.report-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+.report-toolbar-actions { display: flex; gap: 8px; }
+.report-btn {
+  border: 1px solid #D8DEDB; background: #FFFFFF; color: #26292B;
+  padding: 10px 16px; border-radius: 7px; font-weight: 600; font-size: 14px; cursor: pointer;
+}
+.report-btn:hover { border-color: #A8CBBB; }
+.report-btn.primary { background: #14453A; color: #FFFFFF; border-color: #14453A; }
+.report-btn.primary:hover { background: #10382F; border-color: #10382F; }
+
+.report-page {
+  background: #FFFFFF; min-height: 1120px; margin: 0 auto 22px; padding: 40px 44px;
+  box-shadow: 0 8px 28px rgba(38, 41, 43, .07); border: 1px solid #E4E8E6; position: relative;
+}
+.report-page-number {
+  position: absolute; right: 44px; bottom: 26px; color: #9DA09E; font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.report-kicker { font-size: 12px; letter-spacing: .06em; font-weight: 600; color: #9DA09E; }
+.report-title {
+  font-family: 'RIDIBatang', 'Gowun Batang', 'Nanum Myeongjo', serif;
+  font-size: 32px; font-weight: 700; line-height: 1.2; letter-spacing: -.02em;
+  color: #26292B; margin: 10px 0 8px;
+}
+.report-subtitle { color: #5F6260; margin: 0 0 26px; font-size: 14.5px; line-height: 1.7; }
+
+.report-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.report-grid.three { grid-template-columns: repeat(3, 1fr); }
+
+.report-card { border: 1px solid #E4E8E6; border-radius: 10px; padding: 18px 20px; background: #FFFFFF; }
+.report-card h3 { margin: 0 0 12px; font-size: 16px; font-weight: 700; color: #26292B; }
+.report-card p { margin: 6px 0; color: #5F6260; line-height: 1.65; }
+
+.report-metric { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 10px 0; border-bottom: 1px solid #EFF2F0; }
+.report-metric:last-child { border-bottom: 0; }
+.report-metric span { color: #9DA09E; font-size: 13.5px; }
+.report-metric strong {
+  text-align: right; color: #26292B; font-weight: 600;
+  font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; letter-spacing: -.02em;
+}
+
+.report-section { margin-top: 26px; }
+.report-section-head { display: flex; justify-content: space-between; align-items: end; margin-bottom: 12px; }
+.report-section-head span { font-size: 11.5px; letter-spacing: .06em; color: #9DA09E; font-weight: 600; }
+.report-section-head strong { font-size: 19px; font-weight: 700; color: #26292B; }
+
+.report-table { width: 100%; border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.report-table th, .report-table td { border: 1px solid #E4E8E6; padding: 9px 10px; text-align: center; vertical-align: middle; }
+.report-table th { background: #F6F8F7; font-weight: 600; color: #5F6260; }
+.report-table td { color: #26292B; }
+.report-table td.left { text-align: left; }
+
+.report-note { margin-top: 12px; padding: 12px 15px; border-radius: 8px; background: #F6F8F7; color: #5F6260; font-size: 12.5px; line-height: 1.65; }
+
+/* 판정 배지 — 색만으로 구분하지 않도록 텍스트가 항상 함께 놓입니다 */
+.report-status { display: inline-flex; align-items: center; border-radius: 4px; padding: 4px 10px; font-weight: 700; font-size: 11.5px; }
+.report-status.pass { background: #3E7D65; color: #FFFFFF; }
+.report-status.strong { background: #14453A; color: #FFFFFF; }
+.report-status.fit { background: #3E7D65; color: #FFFFFF; }
+.report-status.conditional { background: #EAF2ED; color: #14453A; box-shadow: inset 0 0 0 1px #C9D8D1; }
+.report-status.excess { background: #EAF2ED; color: #14453A; box-shadow: inset 0 0 0 1px #C9D8D1; }
+.report-status.review { background: #F2F4F3; color: #5F6260; box-shadow: inset 0 0 0 1px #E4E8E6; }
+.report-status.fail { background: #FFFFFF; color: #E0512A; box-shadow: inset 0 0 0 1.5px #E0512A; }
+.report-status.short { background: #FFFFFF; color: #E0512A; box-shadow: inset 0 0 0 1.5px #E0512A; }
+
+.report-form-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.report-field { display: flex; flex-direction: column; gap: 6px; }
+.report-field label { font-size: 11.5px; color: #9DA09E; font-weight: 600; }
+.report-field input, .report-field select {
+  width: 100%; box-sizing: border-box; border: 1px solid #D8DEDB; border-radius: 6px;
+  padding: 9px 10px; background: #FFFFFF; color: #26292B; font-size: 13.5px;
+  font-family: inherit; font-variant-numeric: tabular-nums;
+}
+.report-field input:focus, .report-field select:focus { outline: none; border-color: #3E7D65; box-shadow: 0 0 0 3px rgba(62, 125, 101, .14); }
+.report-field input[type=range] { padding: 0; border: 0; box-shadow: none; }
+.report-demand-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+
+/* 종합 판정 — 딥그린 한 면. 브랜드 규칙상 그린은 이런 큰 면에만 씁니다 */
+.report-verdict { border: 0; border-radius: 12px; padding: 24px 26px; background: #14453A; color: #FFFFFF; }
+.report-verdict strong {
+  font-family: 'RIDIBatang', 'Gowun Batang', 'Nanum Myeongjo', serif;
+  font-size: 30px; font-weight: 700; letter-spacing: -.02em; display: block; margin-bottom: 10px; color: #FFFFFF;
+}
+.report-verdict p { margin: 5px 0; line-height: 1.7; color: #A8CBBB; }
+.report-verdict em { font-style: normal; color: #FC7B57; }
+
+.report-source { font-size: 11.5px; color: #9DA09E; line-height: 1.6; }
+.report-warning { border-left: 3px solid #E0512A; padding: 9px 13px; background: #FFF6F2; color: #26292B; font-size: 12.5px; line-height: 1.6; margin-top: 10px; }
+
+.report-map-placeholder {
+  min-height: 260px; border-radius: 10px; border: 1px dashed #C3CCC7; background: #F6F8F7;
+  display: flex; align-items: center; justify-content: center; text-align: center; color: #9DA09E; padding: 20px;
+}
+.report-map-placeholder strong { display: block; color: #26292B; margin-bottom: 7px; }
+
+.report-owner-list { display: grid; gap: 9px; }
+.report-owner-row { padding: 12px 14px; border: 1px solid #E4E8E6; border-radius: 8px; }
+.report-owner-row strong { display: block; margin-bottom: 4px; color: #26292B; }
+
+.report-footer-note { margin-top: 20px; font-size: 11px; color: #9DA09E; line-height: 1.55; }
+
+.matrix-value { font-weight: 700; display: block; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.matrix-sub { font-size: 10.5px; color: #9DA09E; font-variant-numeric: tabular-nums; }
+
+.no-print { display: block; }
+.report-shell:not(.is-admin) .admin-only { display: none; }
+
+@media print {
+  body { background: #FFFFFF !important; }
+  .no-print { display: none !important; }
+  .report-shell { padding: 0; background: #FFFFFF; max-width: none; }
+  .report-page {
+    width: 210mm; min-height: 297mm; height: 297mm; padding: 14mm 14mm 12mm;
+    margin: 0; box-shadow: none; border: 0; page-break-after: always; overflow: hidden;
+  }
+  .report-page:last-child { page-break-after: auto; }
+  .report-title { font-size: 24px; }
+  .report-subtitle { font-size: 12.5px; margin-bottom: 16px; }
+  .report-section { margin-top: 16px; }
+  .report-card { padding: 12px 13px; }
+  /* 인쇄 본문은 12pt(16px) 아래로 내려가지 않게 유지합니다 */
+  .report-card p, .report-note, .report-warning { font-size: 11.5px; line-height: 1.55; }
+  .report-table th, .report-table td { padding: 6px 7px; font-size: 10.5px; }
+  .report-page-number { right: 14mm; bottom: 8mm; }
+  .report-form-grid, .report-demand-grid { gap: 6px; }
+  .report-field input, .report-field select { padding: 6px 7px; font-size: 10.5px; }
+  .report-verdict { padding: 16px 18px; }
+  .report-verdict strong { font-size: 24px; }
+  /* 배경 인쇄가 꺼져 있어도 판정이 읽히도록 */
+  .report-verdict, .report-status { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
