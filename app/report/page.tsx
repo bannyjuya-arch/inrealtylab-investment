@@ -91,6 +91,66 @@ const initialAssumptions: FinancialAssumptions = {
   otherAnnualRevenue: null,
 };
 
+// ── STEP 2에서 고른 값을 읽어온다 (2026-09-03) ──────────────────────────────
+// 예전에는 DEMAND ENGINE 슬롯을 사람이 직접 채워야 매출이 계산됐다. 이제
+// STEP 2의 프로그램 구성이 그 자리를 채우므로, 그 값을 그대로 가져와 쓴다.
+
+type Step2Structure = {
+  landRight: "CONCESSION" | "LEASE_PERMIT" | "TRUST" | "MIXED";
+  concessionType: "BTO" | "BOT";
+  vehicle: "SPC" | "PROJECT_REIT" | "TRUSTEE";
+  publicContributionPct: number;
+};
+
+type Step2Program = {
+  scenarioCode: string;
+  commercial: Record<string, number>;
+  publicFacilities: string[];
+};
+
+const LAND_RIGHT_LABEL: Record<Step2Structure["landRight"], string> = {
+  CONCESSION: "민간투자",
+  LEASE_PERMIT: "대부 · 사용허가",
+  TRUST: "신탁 · 위탁개발",
+  MIXED: "혼합형",
+};
+
+const VEHICLE_LABEL: Record<Step2Structure["vehicle"], string> = {
+  SPC: "프로젝트 SPC",
+  PROJECT_REIT: "개발리츠",
+  TRUSTEE: "신탁사",
+};
+
+const PROGRAM_SPLIT: Record<string, { publicPct: number; commercialPct: number; name: string }> = {
+  PUBLIC_FOCUS: { publicPct: 60, commercialPct: 40, name: "공공성 중심" },
+  BASE: { publicPct: 40, commercialPct: 60, name: "균형형" },
+  COMMERCIAL_FOCUS: { publicPct: 20, commercialPct: 80, name: "수익성 중심" },
+};
+
+// facility_master의 C코드를 이 보고서 엔진의 시설 카테고리로 옮긴다.
+// C07(문화·엔터테인먼트)만 대응 카테고리가 없어 복합용도로 보낸다.
+const C_CODE_TO_CATEGORY: Record<string, CommercialCategoryKey> = {
+  C01: "OFFICE",
+  C02: "RETAIL",
+  C03: "HOSPITALITY",
+  C04: "RESIDENTIAL",
+  C05: "HEALTHCARE",
+  C06: "EDUCATION_RESEARCH",
+  C07: "MIXED_USE",
+  C08: "EDUCATION_RESEARCH",
+  C09: "LOGISTICS_WAREHOUSE",
+  C10: "DATA_CENTER",
+};
+
+function readJson<T>(key: string): T | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseNumber(value: string) {
   if (!value.trim()) return null;
   const parsed = Number(value.replace(/,/g, ""));
@@ -138,6 +198,8 @@ export default function ReportPage() {
   // 계산 결과(판정 매트릭스 등)만 보인다.
   const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  const [structure, setStructure] = useState<Step2Structure | null>(null);
+  const [program, setProgram] = useState<Step2Program | null>(null);
 
   useEffect(() => {
     let supabase;
@@ -168,6 +230,11 @@ export default function ReportPage() {
       // 로그인 자체가 구성되지 않은 환경이면 조용히 무시한다.
     }
   }
+
+  useEffect(() => {
+    setStructure(readJson<Step2Structure>("inrealtylab.step2Structure"));
+    setProgram(readJson<Step2Program>("inrealtylab.step2Program"));
+  }, []);
 
   useEffect(() => {
     try {
@@ -296,6 +363,35 @@ export default function ReportPage() {
     setBasementAutoApplied(true);
   }, [basementAutoApplied, assumptions.basementRatioPct, basementReference]);
 
+  // 지상 연면적 = 대지면적 × 법정 용적률. STEP 2 프로그램 구성이 이 면적을
+  // 공공/수익으로 나누고, 수익 몫을 다시 시설별 비율로 쪼갠다.
+  const aboveGroundGfa = useMemo(() => {
+    const far = snapshot.statutoryFarMaxPct ?? null;
+    if (!siteAreaSqm || !far) return null;
+    return siteAreaSqm * (far / 100);
+  }, [siteAreaSqm, snapshot.statutoryFarMaxPct]);
+
+  const programSplit = program ? PROGRAM_SPLIT[program.scenarioCode] ?? PROGRAM_SPLIT.BASE : null;
+
+  useEffect(() => {
+    if (!program || !programSplit || !aboveGroundGfa) return;
+
+    const commercialGfa = aboveGroundGfa * (programSplit.commercialPct / 100);
+    const publicGfa = aboveGroundGfa * (programSplit.publicPct / 100);
+
+    const byCategory: Partial<Record<CommercialCategoryKey, number | null>> = Object.fromEntries(
+      COMMERCIAL_CATEGORIES.map((item) => [item.key, null])
+    ) as Partial<Record<CommercialCategoryKey, number | null>>;
+
+    for (const [code, pct] of Object.entries(program.commercial)) {
+      const category = C_CODE_TO_CATEGORY[code];
+      if (!category || !pct) continue;
+      byCategory[category] = (byCategory[category] ?? 0) + commercialGfa * (pct / 100);
+    }
+
+    setDemand({ publicRequiredGfa: publicGfa, commercialSupportableGfa: byCategory });
+  }, [program, programSplit, aboveGroundGfa]);
+
   const analysis = useMemo(() => buildIntegratedAnalysis({
     siteAreaSqm,
     farMaxPct: snapshot.statutoryFarMaxPct ?? null,
@@ -374,6 +470,41 @@ export default function ReportPage() {
               </button>)}
         </div>
       </div>
+
+      <div className="report-steps no-print">
+        <span className="done">부지</span>
+        <i />
+        <span className="done">사업구조</span>
+        <i />
+        <span className="current">사업성</span>
+      </div>
+
+      {structure && (
+        <div className="report-conditions no-print">
+          <div>
+            <span>사업방식</span>
+            <strong>
+              {LAND_RIGHT_LABEL[structure.landRight]}
+              {structure.landRight === "CONCESSION" ? ` · ${structure.concessionType}` : ""}
+            </strong>
+          </div>
+          <div>
+            <span>사업주체</span>
+            <strong>{VEHICLE_LABEL[structure.vehicle]}</strong>
+          </div>
+          <div>
+            <span>프로그램</span>
+            <strong>
+              {programSplit ? `${programSplit.name} · 공공 ${programSplit.publicPct} : 수익 ${programSplit.commercialPct}` : "미설정"}
+            </strong>
+          </div>
+          <div>
+            <span>공공기여</span>
+            <strong>{structure.publicContributionPct}%</strong>
+          </div>
+          <a className="report-conditions-back" href="/control">사업구조 다시 고르기</a>
+        </div>
+      )}
 
       <section className="report-page">
         <div className="report-kicker">01 · SITE / LEGAL STATUS</div>
