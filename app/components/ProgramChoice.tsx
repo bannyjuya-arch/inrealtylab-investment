@@ -114,6 +114,17 @@ export default function ProgramChoice() {
   useEffect(() => {
     setAllowedKeys(readAllowedKeys());
     setAboveGroundGfa(readAboveGroundGfa());
+
+    // STEP 2의 허용용도 조회는 비동기라 이 컴포넌트가 뜬 뒤에 끝난다.
+    // 끝났다는 신호를 받으면 그때 다시 읽는다.
+    function onAllowedUse(event: Event) {
+      const detail = (event as CustomEvent).detail;
+      if (Array.isArray(detail)) setAllowedKeys(detail as string[]);
+      setAboveGroundGfa(readAboveGroundGfa());
+    }
+
+    window.addEventListener("inrealtylab:allowedUse", onAllowedUse);
+    return () => window.removeEventListener("inrealtylab:allowedUse", onAllowedUse);
   }, []);
 
   const available = useMemo(() => {

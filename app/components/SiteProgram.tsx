@@ -183,6 +183,9 @@ export default function SiteProgram() {
               .filter((facility: AllowedUseFacility) => facility.decision === "ALLOWED" || facility.decision === "CONDITIONAL")
               .map((facility: AllowedUseFacility) => facility.key);
             sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
+            // 프로그램 구성은 이 컴포넌트와 같은 화면에 동시에 뜬다. 조회가 끝나는
+            // 시점이 나중이라 스토리지만 써두면 못 읽고 지나간다 — 끝났다고 알린다.
+            window.dispatchEvent(new CustomEvent("inrealtylab:allowedUse", { detail: allowedKeys }));
           } catch {
             // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
           }
