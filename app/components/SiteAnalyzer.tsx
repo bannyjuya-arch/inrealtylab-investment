@@ -629,11 +629,19 @@ export default function SiteAnalyzer() {
 
   return (
     <main className="site-analyzer-shell">
+      <div className="step-rail">
+        <div className="step-item current"><span className="step-num">1</span>부지</div>
+        <div className="step-line" />
+        <div className="step-item"><span className="step-num">2</span>사업구조</div>
+        <div className="step-line" />
+        <div className="step-item"><span className="step-num">3</span>사업성</div>
+      </div>
+
       <header className="site-analyzer-header">
         <div>
-          <div className="product-kicker">INRealtyLab · Site Analyzer</div>
-          <h1>대지를 선택하면 분석이 시작됩니다.</h1>
-          <p>지도에서 실제 지적 필지를 지정하고 PNU와 대지면적을 확보하는 첫 단계입니다.</p>
+          <div className="product-kicker">INREALTYLAB · STEP 1 부지</div>
+          <h1>토지의 종류부터 가립니다</h1>
+          <p>국공유지인지 아닌지를 먼저 확인합니다. 국공유지만 다음 단계로 넘어갑니다.</p>
         </div>
         <div className="beta-chip">CORE v0.5</div>
       </header>
@@ -660,6 +668,11 @@ export default function SiteAnalyzer() {
               지적 경계
             </label>
             <span>클릭: 필지 추가 선택</span>
+            <div className="map-legend">
+              <span><i className="swatch public" />국공유지</span>
+              <span><i className="swatch private" />민간</span>
+              <span><i className="swatch unknown" />확인 중</span>
+            </div>
             <button type="button" onClick={clearSelection} disabled={!parcels.length}>선택 초기화</button>
           </div>
           <div ref={mapElementRef} className="map-canvas" />
