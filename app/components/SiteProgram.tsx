@@ -139,6 +139,24 @@ export default function SiteProgram() {
         if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회에 실패했습니다.");
         loadedRegulation = data.regulation as RegulationData;
         if (!cancelled) setRegulation(loadedRegulation);
+        // STEP 3 보고서가 읽는 스냅샷에 용도지역·법정상한을 채워 넣는다.
+        // 예전에는 Part 1의 CAPACITY 탭에서 긁어 담던 값이다(2026-09-03).
+        try {
+          const previous = sessionStorage.getItem("inrealtylab.part1Snapshot");
+          sessionStorage.setItem(
+            "inrealtylab.part1Snapshot",
+            JSON.stringify({
+              ...(previous ? JSON.parse(previous) : {}),
+              pnus,
+              siteAreaSqm,
+              primaryZone: loadedRegulation.primaryZone,
+              statutoryBcrMaxPct: loadedRegulation.statutoryLimit?.bcrMax ?? null,
+              statutoryFarMaxPct: loadedRegulation.statutoryLimit?.farMax ?? null,
+            })
+          );
+        } catch {
+          // 스토리지를 못 쓰면 STEP 3에서 값을 직접 입력하게 된다.
+        }
       } catch (error) {
         if (!cancelled) setRegulationError(error instanceof Error ? error.message : "규제정보 조회에 실패했습니다.");
       }

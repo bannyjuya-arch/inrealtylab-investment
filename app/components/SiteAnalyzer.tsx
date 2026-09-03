@@ -21,72 +21,6 @@ type SearchResult = {
   point: { lon: number; lat: number };
 };
 
-type RegulationHit = {
-  layer: string;
-  category: string;
-  label: string;
-  name: string;
-  designationYear?: string | null;
-  designationNumber?: string | null;
-};
-
-type RegulationData = {
-  primaryZone: string | null;
-  useZones: RegulationHit[];
-  districts: RegulationHit[];
-  areas: RegulationHit[];
-  districtPlans: RegulationHit[];
-  developmentRestrictions: RegulationHit[];
-  landTransactionPermit: RegulationHit[];
-  statutoryLimit: null | {
-    zoneName: string;
-    bcrMax: number;
-    farMin: number;
-    farMax: number;
-    legalBasis: string;
-    effectiveDate: string;
-    scope: string;
-  };
-  warnings: string[];
-  layerErrors: Array<{ layer: string; label: string; message: string }>;
-};
-
-type AllowedUseDecision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
-
-type AllowedUseFacility = {
-  key: string;
-  label: string;
-  group: string;
-  decision: AllowedUseDecision;
-  reason: string;
-  confidence: number;
-  activityCode: string | null;
-  activityName: string | null;
-  evidence: Array<{
-    activityName: string;
-    decisionRaw: string;
-    condition: string | null;
-    legalBasis: string | null;
-    confidence: number;
-  }>;
-};
-
-type AllowedUseData = {
-  facilities: AllowedUseFacility[];
-  diagnostics: {
-    activityCatalogCount: number;
-    matchedFacilityCount: number;
-  };
-  source: {
-    code: string;
-    name: string;
-    endpoints: string[];
-    baseDate: string;
-    queriedAt: string;
-    note: string;
-  };
-};
-
 function ensureOpenLayers(): Promise<any> {
   if (typeof window === "undefined") return Promise.reject(new Error("browser only"));
   if ((window as any).ol) return Promise.resolve((window as any).ol);
@@ -140,27 +74,6 @@ function getRawFeatureCenter(rawFeature: any) {
   return { lon, lat };
 }
 
-function formatPct(value: number) {
-  return `${value.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
-}
-
-function formatArea(value: number) {
-  return `${Math.round(value).toLocaleString("ko-KR")}㎡`;
-}
-
-function decisionLabel(decision: AllowedUseDecision) {
-  if (decision === "ALLOWED") return "가능";
-  if (decision === "CONDITIONAL") return "조건부";
-  if (decision === "PROHIBITED") return "불가";
-  return "추가확인";
-}
-
-function decisionTone(decision: AllowedUseDecision): "ok" | "pending" | "warn" | "neutral" {
-  if (decision === "ALLOWED") return "ok";
-  if (decision === "CONDITIONAL" || decision === "PROHIBITED") return "warn";
-  if (decision === "REVIEW") return "pending";
-  return "neutral";
-}
 
 // 2026-09-03 확정: STEP 1은 "토지의 종류"만 가린다.
 // 국공유지냐 민간이냐를 여기서 판정하고, 민간이면 이후 단계로 넘기지 않는다.
@@ -203,13 +116,6 @@ export default function SiteAnalyzer() {
   const [loading, setLoading] = useState(false);
   const [cadastreVisible, setCadastreVisible] = useState(true);
   const [parcels, setParcels] = useState<SelectedParcel[]>([]);
-  const [activeTab, setActiveTab] = useState<"SITE" | "REGULATION" | "USE" | "CAPACITY">("SITE");
-  const [regulation, setRegulation] = useState<RegulationData | null>(null);
-  const [regulationLoading, setRegulationLoading] = useState(false);
-  const [regulationError, setRegulationError] = useState("");
-  const [allowedUse, setAllowedUse] = useState<AllowedUseData | null>(null);
-  const [allowedUseLoading, setAllowedUseLoading] = useState(false);
-  const [allowedUseError, setAllowedUseError] = useState("");
   const [ownershipByPnu, setOwnershipByPnu] = useState<Record<string, ParcelOwnership>>({});
   // 이미 조회를 건 PNU. state로 추적하면 effect가 자기 자신을 다시 트리거해
   // 진행 중이던 요청을 취소해버리므로 ref로 둔다.
@@ -220,55 +126,6 @@ export default function SiteAnalyzer() {
     [parcels]
   );
 
-  const capacityScenarios = useMemo(() => {
-    const limit = regulation?.statutoryLimit;
-    if (!limit || totalArea <= 0) return [];
-
-    return [
-      {
-        name: "보수 검토",
-        bcr: limit.bcrMax * 0.8,
-        far: limit.farMax * 0.8,
-        note: "법정상한의 80% 사업검토 가정",
-        status: "ASSUMPTION",
-      },
-      {
-        name: "기준 검토",
-        bcr: limit.bcrMax * 0.9,
-        far: limit.farMax * 0.9,
-        note: "법정상한의 90% 사업검토 가정",
-        status: "ASSUMPTION",
-      },
-      {
-        name: "법정 최대",
-        bcr: limit.bcrMax,
-        far: limit.farMax,
-        note: "현재 연결된 국가 법정상한",
-        status: "STATUTORY",
-      },
-    ].map((item) => {
-      const footprint = totalArea * (item.bcr / 100);
-      const grossFloorArea = totalArea * (item.far / 100);
-      const equivalentFloors = footprint > 0 ? grossFloorArea / footprint : 0;
-      return {
-        ...item,
-        footprint,
-        grossFloorArea,
-        equivalentFloors,
-        footprintPyeong: footprint / 3.305785,
-        grossFloorAreaPyeong: grossFloorArea / 3.305785,
-      };
-    });
-  }, [regulation, totalArea]);
-
-  const statutoryCapacity = useMemo(() => {
-    const limit = regulation?.statutoryLimit;
-    if (!limit || totalArea <= 0) return null;
-    return {
-      footprint: totalArea * (limit.bcrMax / 100),
-      grossFloorArea: totalArea * (limit.farMax / 100),
-    };
-  }, [regulation, totalArea]);
 
   useEffect(() => {
     let disposed = false;
@@ -371,18 +228,9 @@ export default function SiteAnalyzer() {
   useEffect(() => {
     if (!parcels.length) {
       setQuery("");
-      setRegulation(null);
-      setRegulationError("");
-      setAllowedUse(null);
-      setAllowedUseError("");
-      setActiveTab("SITE");
     } else {
       const representative = parcels[0];
       setQuery([representative.legalDong, representative.jibun].filter(Boolean).join(" "));
-      setRegulation(null);
-      setRegulationError("");
-      setAllowedUse(null);
-      setAllowedUseError("");
     }
   }, [parcels]);
 
@@ -565,82 +413,30 @@ export default function SiteAnalyzer() {
     }
   }
 
-  async function fetchRegulationData() {
-    if (!parcels.length) throw new Error("먼저 필지를 선택하세요.");
-    const center = getRawFeatureCenter(parcels[0].feature);
-    if (!center) throw new Error("선택 필지의 중심 좌표를 계산하지 못했습니다.");
-
-    const response = await fetch(
-      `/api/regulation?lon=${encodeURIComponent(center.lon)}&lat=${encodeURIComponent(center.lat)}&pnu=${encodeURIComponent(parcels[0].pnu)}`
-    );
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회에 실패했습니다.");
-    return data.regulation as RegulationData;
-  }
-
-  async function loadRegulation(nextTab: "REGULATION" | "CAPACITY") {
-    if (!parcels.length) return;
-    setActiveTab(nextTab);
-    if (regulation || regulationLoading) return;
-
-    setRegulationLoading(true);
-    setRegulationError("");
-    try {
-      const nextRegulation = await fetchRegulationData();
-      setRegulation(nextRegulation);
-    } catch (error) {
-      setRegulationError(error instanceof Error ? error.message : "규제정보 조회에 실패했습니다.");
-    } finally {
-      setRegulationLoading(false);
-    }
-  }
-
-  async function loadAllowedUse() {
-    if (!parcels.length) return;
-    setActiveTab("USE");
-    if (allowedUse || allowedUseLoading) return;
-
-    setAllowedUseLoading(true);
-    setAllowedUseError("");
-    try {
-      let currentRegulation = regulation;
-      if (!currentRegulation) {
-        setRegulationLoading(true);
-        currentRegulation = await fetchRegulationData();
-        setRegulation(currentRegulation);
-        setRegulationLoading(false);
-      }
-
-      const zoneName = currentRegulation.primaryZone ?? currentRegulation.useZones[0]?.name ?? "";
-      const legalGfa = currentRegulation.statutoryLimit
-        ? totalArea * (currentRegulation.statutoryLimit.farMax / 100)
-        : null;
-      const gfaParam = legalGfa && legalGfa > 0
-        ? `&aboveGroundGfaSqm=${encodeURIComponent(legalGfa)}`
-        : "";
-      const response = await fetch(
-        `/api/allowed-use?pnu=${encodeURIComponent(parcels[0].pnu)}&zoneName=${encodeURIComponent(zoneName)}&scenarioCode=BASE${gfaParam}`
-      );
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data?.message ?? data?.error ?? "건축 가능시설 조회에 실패했습니다.");
-      setAllowedUse({
-        facilities: data.facilities ?? [],
-        diagnostics: data.diagnostics,
-        source: data.source,
-      });
-    } catch (error) {
-      setRegulationLoading(false);
-      setAllowedUseError(error instanceof Error ? error.message : "건축 가능시설 조회에 실패했습니다.");
-    } finally {
-      setAllowedUseLoading(false);
-    }
-  }
-
   function removeParcel(id: string) {
     const feature = selectedSourceRef.current?.getFeatureById(id);
     if (feature) selectedSourceRef.current.removeFeature(feature);
     setParcels((current) => current.filter((parcel) => parcel.id !== id));
     setMessage("선택 필지를 해제했습니다.");
+  }
+
+  // STEP 2로 넘긴다. 예전에는 Part2Launcher가 CAPACITY 탭 DOM을 긁어 값을 만들었지만,
+  // 이제 STEP 1이 자기 상태에서 직접 스냅샷을 쓴다(2026-09-03).
+  function goToStep2() {
+    if (!parcels.length) return;
+    const pnus = parcels.map((parcel) => parcel.pnu).filter((pnu) => /^\d{19}$/.test(pnu));
+    try {
+      const previous = sessionStorage.getItem("inrealtylab.part1Snapshot");
+      const merged = {
+        ...(previous ? JSON.parse(previous) : {}),
+        pnus,
+        siteAreaSqm: totalArea,
+      };
+      sessionStorage.setItem("inrealtylab.part1Snapshot", JSON.stringify(merged));
+    } catch {
+      // 스토리지를 못 쓰면 쿼리스트링만으로도 STEP 2는 동작한다.
+    }
+    window.location.href = `/control?pnus=${encodeURIComponent(pnus.join(","))}`;
   }
 
   function clearSelection() {
@@ -702,15 +498,6 @@ export default function SiteAnalyzer() {
         </div>
 
         <aside className="analysis-panel">
-          <div className="analysis-tabs">
-            <button className={activeTab === "SITE" ? "active" : ""} onClick={() => setActiveTab("SITE")}>SITE</button>
-            <button className={activeTab === "REGULATION" ? "active" : ""} disabled={!parcels.length || analysisBlocked} onClick={() => loadRegulation("REGULATION")}>REGULATION</button>
-            <button className={activeTab === "USE" ? "active" : ""} disabled={!parcels.length || analysisBlocked} onClick={loadAllowedUse}>USE</button>
-            <button className={activeTab === "CAPACITY" ? "active" : ""} disabled={!parcels.length || analysisBlocked} onClick={() => loadRegulation("CAPACITY")}>CAPACITY</button>
-          </div>
-
-          {activeTab === "SITE" && (
-            <>
               <div className="analysis-summary">
                 <span>선택 필지</span>
                 <strong>{parcels.length}필지</strong>
@@ -765,257 +552,15 @@ export default function SiteAnalyzer() {
                 </div>
               ) : (
                 <div className="next-step-card">
-                  <span>NEXT</span>
-                  <strong>법적 규제 분석</strong>
-                  <p>선택된 PNU를 기준으로 용도지역·지구·구역과 국가 법정 건폐율·용적률 범위를 조회합니다.</p>
-                  <button type="button" disabled={!parcels.length || siteOwnership === "LOADING"} onClick={() => loadRegulation("REGULATION")}>REGULATION 보기</button>
+                  <span>STEP 2</span>
+                  <strong>사업구조</strong>
+                  <p>용도지역·건폐율·용적률과 지을 수 있는 용도를 조회하고, 사업방식과 시설 구성을 정합니다.</p>
+                  <button type="button" disabled={!parcels.length || siteOwnership === "LOADING"} onClick={goToStep2}>사업구조로</button>
                 </div>
               )}
-            </>
-          )}
 
-          {activeTab === "REGULATION" && (
-            <div className="regulation-view">
-              <div className="section-title-row">
-                <div><span>REGULATION</span><strong>법적 규제 분석</strong></div>
-                {regulationLoading && <small>조회 중...</small>}
-              </div>
-              {regulationError && <div className="analysis-alert error">{regulationError}</div>}
-              {!regulation && !regulationLoading && !regulationError && <div className="empty-site">규제정보를 불러오지 못했습니다.</div>}
-              {regulation && (
-                <>
-                  <div className="metric-grid">
-                    <div><span>주요 용도지역</span><strong>{regulation.primaryZone ?? "확인 필요"}</strong></div>
-                    <div><span>건폐율 상한</span><strong>{regulation.statutoryLimit ? formatPct(regulation.statutoryLimit.bcrMax) : "-"}</strong></div>
-                    <div><span>용적률 상한</span><strong>{regulation.statutoryLimit ? formatPct(regulation.statutoryLimit.farMax) : "-"}</strong></div>
-                  </div>
-
-                  <div className="regulation-groups">
-                    <RegulationGroup title="용도지역" items={regulation.useZones} />
-                    <RegulationGroup title="용도지구" items={regulation.districts} />
-                    <RegulationGroup title="용도구역" items={regulation.areas} />
-                    <RegulationGroup title="지구단위계획" items={regulation.districtPlans} />
-                    <RegulationGroup title="개발행위 제한" items={regulation.developmentRestrictions} />
-                    <RegulationGroup title="토지거래허가" items={regulation.landTransactionPermit} />
-                  </div>
-
-                  {regulation.statutoryLimit && (
-                    <div className="source-note">
-                      <strong>{regulation.statutoryLimit.legalBasis}</strong>
-                      <span>시행기준 {regulation.statutoryLimit.effectiveDate}</span>
-                      <p>{regulation.statutoryLimit.scope}</p>
-                    </div>
-                  )}
-                  {regulation.warnings.map((warning) => <div className="analysis-alert" key={warning}>{warning}</div>)}
-                  {!!regulation.layerErrors.length && (
-                    <div className="analysis-alert">일부 주제도 조회 실패 {regulation.layerErrors.length}건 — 다른 규제 결과는 그대로 표시합니다.</div>
-                  )}
-
-                  <div className="next-step-card">
-                    <span>NEXT</span>
-                    <strong>건축 가능시설</strong>
-                    <p>선택 필지의 시군구와 용도지역을 기준으로 토지이용행위 가능여부를 조회해 가능·조건부·불가·추가확인으로 표시합니다.</p>
-                    <button type="button" onClick={loadAllowedUse}>USE 보기</button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {activeTab === "USE" && (
-            <div className="regulation-view">
-              <div className="section-title-row">
-                <div><span>USE</span><strong>건축 가능시설</strong></div>
-                {allowedUseLoading && <small>공공데이터 조회 중...</small>}
-              </div>
-
-              {allowedUseError && <div className="analysis-alert error">{allowedUseError}</div>}
-              {!allowedUse && !allowedUseLoading && !allowedUseError && <div className="empty-site">건축 가능시설 정보를 불러오지 못했습니다.</div>}
-
-              {allowedUse && (
-                <>
-                  <div className="metric-grid">
-                    <div><span>기준 용도지역</span><strong>{regulation?.primaryZone ?? "추가확인"}</strong></div>
-                    <div><span>행위코드 매칭</span><strong>{allowedUse.diagnostics.matchedFacilityCount}/{allowedUse.facilities.length}</strong></div>
-                    <div><span>기준일</span><strong>{allowedUse.source.baseDate}</strong></div>
-                  </div>
-
-                  <AllowedUseGroup title="업무시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "OFFICE")} />
-                  <AllowedUseGroup title="판매·근린생활시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "RETAIL")} />
-                  <AllowedUseGroup title="기타 수익시설" facilities={allowedUse.facilities.filter((facility) => !["OFFICE", "RETAIL", "PUBLIC"].includes(facility.group))} />
-                  <AllowedUseGroup title="공공·필수시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "PUBLIC")} />
-
-                  <div className="source-note">
-                    <strong>{allowedUse.source.name}</strong>
-                    <span>기준일 {allowedUse.source.baseDate} · {allowedUse.source.endpoints.join(" + ")}</span>
-                    <p>{allowedUse.source.note}</p>
-                  </div>
-
-                  {regulation?.districtPlans.length ? (
-                    <div className="analysis-alert">지구단위계획구역이 중첩되어 있습니다. 여기의 행위제한 1차 판정 외에 지구단위계획 결정도서의 허용용도·불허용도를 반드시 추가 확인해야 합니다.</div>
-                  ) : null}
-                  {parcels.length > 1 && (
-                    <div className="analysis-alert error">현재 USE 판정은 대표 필지 1개 기준입니다. 복수 필지의 용도지역이 다른 경우 필지별 판정으로 확장해야 합니다.</div>
-                  )}
-
-                  <div className="next-step-card">
-                    <span>NEXT</span>
-                    <strong>개발가능 규모</strong>
-                    <p>무엇을 지을 수 있는지 확인한 뒤, 대지면적과 건폐율·용적률을 기준으로 개발가능 규모를 계산합니다.</p>
-                    <button type="button" onClick={() => loadRegulation("CAPACITY")}>CAPACITY 보기</button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {activeTab === "CAPACITY" && (
-            <div className="capacity-view">
-              <div className="section-title-row">
-                <div><span>CAPACITY</span><strong>개발가능 규모</strong></div>
-                {regulationLoading && <small>규제정보 조회 중...</small>}
-              </div>
-              {regulationError && <div className="analysis-alert error">{regulationError}</div>}
-              {regulation && regulation.statutoryLimit && statutoryCapacity ? (
-                <>
-                  <div className="capacity-basis">
-                    <span>현재 계산 기준</span>
-                    <strong>{regulation.primaryZone ?? regulation.statutoryLimit.zoneName}</strong>
-                    <p>대지 {formatArea(totalArea)} · BCR {formatPct(regulation.statutoryLimit.bcrMax)} · FAR {formatPct(regulation.statutoryLimit.farMax)}</p>
-                  </div>
-
-                  <div className="metric-grid capacity-metrics">
-                    <div>
-                      <span>적용 대지면적</span>
-                      <strong>{formatArea(totalArea)}</strong>
-                      <small>{(totalArea / 3.305785).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</small>
-                    </div>
-                    <div>
-                      <span>법정 최대 건축면적</span>
-                      <strong>{formatArea(statutoryCapacity.footprint)}</strong>
-                      <small>BCR {formatPct(regulation.statutoryLimit.bcrMax)}</small>
-                    </div>
-                    <div>
-                      <span>법정 최대 연면적</span>
-                      <strong>{formatArea(statutoryCapacity.grossFloorArea)}</strong>
-                      <small>FAR {formatPct(regulation.statutoryLimit.farMax)}</small>
-                    </div>
-                  </div>
-
-                  <div className="capacity-subtitle">
-                    <strong>규모 시나리오</strong>
-                    <span>보수/기준안은 사업검토 가정이며 법적 기준이 아닙니다.</span>
-                  </div>
-
-                  <div className="scenario-list">
-                    {capacityScenarios.map((scenario) => (
-                      <article className={`scenario-card ${scenario.status === "STATUTORY" ? "statutory" : ""}`} key={scenario.name}>
-                        <div className="scenario-head">
-                          <strong>{scenario.name}</strong>
-                          <span>{scenario.note}</span>
-                        </div>
-                        <dl>
-                          <div><dt>건폐율</dt><dd>{formatPct(scenario.bcr)}</dd></div>
-                          <div><dt>용적률</dt><dd>{formatPct(scenario.far)}</dd></div>
-                          <div><dt>건축면적</dt><dd>{formatArea(scenario.footprint)}</dd></div>
-                          <div><dt>연면적</dt><dd>{formatArea(scenario.grossFloorArea)}</dd></div>
-                          <div><dt>연면적(평)</dt><dd>{scenario.grossFloorAreaPyeong.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</dd></div>
-                          <div><dt>단순 환산층수</dt><dd>{scenario.equivalentFloors.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}층</dd></div>
-                        </dl>
-                      </article>
-                    ))}
-                  </div>
-
-                  <div className="capacity-subtitle">
-                    <strong>규제 반영 상태</strong>
-                    <span>어떤 값이 계산에 들어갔는지 추적합니다.</span>
-                  </div>
-                  <div className="capacity-status-list">
-                    <CapacityStatus label="대지면적 / PNU" status="반영" tone="ok" detail="VWorld 지적 필지" />
-                    <CapacityStatus label="용도지역" status="반영" tone="ok" detail={regulation.primaryZone ?? "세부지역 확인 필요"} />
-                    <CapacityStatus label="건축 가능시설" status={allowedUse ? "조회" : "미조회"} tone={allowedUse ? "ok" : "pending"} detail={allowedUse ? "국토교통부 토지이용규제정보서비스" : "USE 단계에서 조회"} />
-                    <CapacityStatus label="국가 건폐율·용적률" status="반영" tone="ok" detail={regulation.statutoryLimit.legalBasis} />
-                    <CapacityStatus label="지자체 조례" status="미반영" tone="pending" detail="조례 Rule DB 연결 예정" />
-                    <CapacityStatus
-                      label="지구단위계획 세부지침"
-                      status={regulation.districtPlans.length ? "검토 필요" : "중첩 없음"}
-                      tone={regulation.districtPlans.length ? "warn" : "neutral"}
-                      detail={regulation.districtPlans.length ? regulation.districtPlans.map((item) => item.name).join(", ") : "공간중첩 기준"}
-                    />
-                    <CapacityStatus label="인센티브 / 특례" status="미반영" tone="pending" detail="승인된 Regulation Rule만 향후 자동 적용" />
-                  </div>
-
-                  {parcels.length > 1 && (
-                    <div className="analysis-alert error">현재 REGULATION/USE/CAPACITY는 첫 번째 선택 필지 기준입니다. 복수 필지가 서로 다른 용도지역에 걸치는 경우 필지별 규제·허용용도 계산으로 확장해야 정확합니다.</div>
-                  )}
-                  <div className="analysis-alert">단순 환산층수는 연면적 ÷ 건축면적의 기초 지표입니다. 실제 층수는 높이, 일조, 도로, 주차, 코어·공용부, 용적률 산입 제외면적, 지구단위계획 및 개별법 검토 후 달라집니다.</div>
-                  <div className="analysis-alert">현재 CAPACITY에는 국가 법정상한만 자동 반영됩니다. 앞서 구축한 규정 DB에서 서울시 조례·고시·인센티브 규칙이 검토 후 ACTIVE가 되면 이 단계에서 적용기준과 산식을 덮어쓰도록 연결합니다.</div>
-                </>
-              ) : !regulationLoading && (
-                <div className="empty-site"><strong>CAPACITY 계산 대기</strong><p>세부 용도지역과 건폐율·용적률 기준이 확인되어야 계산할 수 있습니다.</p></div>
-              )}
-            </div>
-          )}
         </aside>
       </section>
     </main>
-  );
-}
-
-function RegulationGroup({ title, items }: { title: string; items: RegulationHit[] }) {
-  return (
-    <section className="regulation-group">
-      <div className="regulation-group-head"><strong>{title}</strong><span>{items.length}건</span></div>
-      {items.length ? (
-        <ul>{items.map((item, index) => <li key={`${item.layer}-${item.name}-${index}`}><span>{item.name}</span><small>{item.label}</small></li>)}</ul>
-      ) : (
-        <p>중첩 없음</p>
-      )}
-    </section>
-  );
-}
-
-function AllowedUseGroup({ title, facilities }: { title: string; facilities: AllowedUseFacility[] }) {
-  return (
-    <section className="regulation-group">
-      <div className="regulation-group-head"><strong>{title}</strong><span>{facilities.length}개</span></div>
-      {facilities.length ? (
-        <div className="capacity-status-list">
-          {facilities.map((facility) => (
-            <CapacityStatus
-              key={facility.key}
-              label={facility.label}
-              status={decisionLabel(facility.decision)}
-              tone={decisionTone(facility.decision)}
-              detail={`${facility.activityName ?? "행위코드 추가확인"} · 신뢰도 ${Math.round(facility.confidence * 100)}% · ${facility.reason}`}
-            />
-          ))}
-        </div>
-      ) : (
-        <p>대상 시설 없음</p>
-      )}
-    </section>
-  );
-}
-
-function CapacityStatus({
-  label,
-  status,
-  tone,
-  detail,
-}: {
-  label: string;
-  status: string;
-  tone: "ok" | "pending" | "warn" | "neutral";
-  detail: string;
-}) {
-  return (
-    <div className="capacity-status-row">
-      <div>
-        <strong>{label}</strong>
-        <small>{detail}</small>
-      </div>
-      <span className={`status-chip ${tone}`}>{status}</span>
-    </div>
   );
 }
