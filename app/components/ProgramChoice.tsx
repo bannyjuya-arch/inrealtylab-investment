@@ -127,17 +127,22 @@ export default function ProgramChoice() {
     return () => window.removeEventListener("inrealtylab:allowedUse", onAllowedUse);
   }, []);
 
+  // 조회 결과에 "가능·조건부"가 하나도 없으면 그건 전부 불가라는 뜻이 아니라
+  // 행위코드 판정이 아직 안 끝났다는 뜻이다. 그 둘을 섞으면 화면이 거짓말을 한다.
+  const undecided = allowedKeys !== null && allowedKeys.length === 0;
+
   const available = useMemo(() => {
     if (!allowedKeys) return [];
+    if (undecided) return [...COMMERCIAL].sort((a, b) => a.priority - b.priority);
     return COMMERCIAL
       .filter((facility) => facility.allowedFrom.some((key) => allowedKeys.includes(key)))
       .sort((a, b) => a.priority - b.priority);
-  }, [allowedKeys]);
+  }, [allowedKeys, undecided]);
 
   const blocked = useMemo(() => {
-    if (!allowedKeys) return [];
+    if (!allowedKeys || undecided) return [];
     return COMMERCIAL.filter((facility) => !facility.allowedFrom.some((key) => allowedKeys.includes(key)));
-  }, [allowedKeys]);
+  }, [allowedKeys, undecided]);
 
   // 1차 제안을 만들거나, 저장해둔 사용자 수정본을 되살린다.
   useEffect(() => {
@@ -145,8 +150,13 @@ export default function ProgramChoice() {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
-        setSelection(JSON.parse(raw) as ProgramSelection);
-        return;
+        const saved = JSON.parse(raw) as ProgramSelection;
+        // 시설이 하나도 안 담긴 저장본은 고를 게 없던 시절의 잔재다.
+        // 그대로 되살리면 합계 0%로 멈추므로 다시 제안한다.
+        if (saved.commercial && Object.keys(saved.commercial).length > 0) {
+          setSelection(saved);
+          return;
+        }
       }
     } catch {
       // 저장본을 못 읽으면 새로 제안한다.
@@ -274,6 +284,13 @@ export default function ProgramChoice() {
       <p className="choice-hint">
         수요를 기준으로 구성을 먼저 제안했습니다. 각 줄을 바꾸면 손대지 않은 줄이 자동으로 조정돼 합계 100%가 유지됩니다.
       </p>
+
+      {undecided && (
+        <div className="control-warning">
+          이 필지의 행위제한 판정이 확정되지 않아, 우선 전체 시설을 놓고 구성합니다.
+          허용 용도가 확인되면 고를 수 있는 시설이 그에 맞게 좁혀집니다.
+        </div>
+      )}
 
       {/* ── 시나리오 ── */}
       <div className="choice-grid three">
