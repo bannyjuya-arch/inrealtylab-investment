@@ -449,6 +449,28 @@ export default function SiteAnalyzer() {
   // 민간소유가 하나라도 섞이면 다음 단계로 넘기지 않는다.
   const analysisBlocked = siteOwnership === "PRIVATE";
 
+  // STEP 2가 읽어갈 값을 남긴다. Part2Launcher의 DOM 스크래핑과 별개 키를 쓰므로
+  // 기존 흐름에는 영향이 없다(2026-09-03).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (!parcels.length) {
+        sessionStorage.removeItem("inrealtylab.step1");
+        return;
+      }
+      sessionStorage.setItem(
+        "inrealtylab.step1",
+        JSON.stringify({
+          pnus: parcels.map((parcel) => parcel.pnu),
+          siteAreaSqm: totalArea,
+          center: getRawFeatureCenter(parcels[0].feature),
+        })
+      );
+    } catch {
+      // 세션 스토리지를 못 쓰는 환경이면 STEP 2에서 안내가 뜬다.
+    }
+  }, [parcels, totalArea]);
+
   async function fetchParcel(lon: number, lat: number) {
     const response = await fetch(`/api/cadastre?lon=${encodeURIComponent(lon)}&lat=${encodeURIComponent(lat)}`);
     const data = await response.json();

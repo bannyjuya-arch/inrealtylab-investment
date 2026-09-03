@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import PublicAssetDetails from "./PublicAssetDetails";
+import SiteProgram from "../components/SiteProgram";
 import "./control.css";
 
 type Gate = {
@@ -254,6 +255,9 @@ export default function ControlPage() {
             </div>
             <p>{overall.summary}</p>
           </section>
+
+          {/* 2026-09-03: 기존 Part 1의 REGULATION·USE·CAPACITY를 STEP 2로 이관 */}
+          <SiteProgram />
 
           <section className="control-section">
             <div className="control-section-title">
