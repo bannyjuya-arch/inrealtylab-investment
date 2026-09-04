@@ -125,11 +125,20 @@
   body { background: #FFFFFF !important; }
   .no-print { display: none !important; }
   .report-shell { padding: 0; background: #FFFFFF; max-width: none; }
+  /* height:297mm + overflow:hidden 조합이 3면 하단을 말없이 잘라내고 있었습니다.
+     내용이 넘치면 잘라내는 대신 다음 장으로 흘려보냅니다 — 잘린 판정이 남는 것보다
+     장수가 하나 느는 편이 낫습니다. */
   .report-page {
-    width: 210mm; min-height: 297mm; height: 297mm; padding: 14mm 14mm 12mm;
-    margin: 0; box-shadow: none; border: 0; page-break-after: always; overflow: hidden;
+    width: 210mm; min-height: 297mm; padding: 14mm 14mm 12mm;
+    margin: 0; box-shadow: none; border: 0; page-break-after: always;
   }
   .report-page:last-child { page-break-after: auto; }
+  /* 표·카드·판정 블록이 장 경계에서 두 동강 나지 않게 합니다. */
+  .report-section, .report-card, .report-note, .report-warning, .report-verdict {
+    break-inside: avoid; page-break-inside: avoid;
+  }
+  .report-table { break-inside: avoid; page-break-inside: avoid; }
+  .report-title, .report-kicker { break-after: avoid; page-break-after: avoid; }
   .report-title { font-size: 24px; }
   .report-subtitle { font-size: 12.5px; margin-bottom: 16px; }
   .report-section { margin-top: 16px; }

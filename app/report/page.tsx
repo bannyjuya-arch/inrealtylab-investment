@@ -626,9 +626,9 @@ export default function ReportPage() {
       </div>
 
       <section className="report-page">
-        <div className="report-kicker">01 · SITE / LEGAL STATUS</div>
+        <div className="report-kicker">01 · SITE — 대지 조건</div>
         <h1 className="report-title">{address} 사업추진 약식검토</h1>
-        <p className="report-subtitle">지도·대지현황·법적 개발가능 규모</p>
+        <p className="report-subtitle">위치·대지현황 · 소유와 협의대상 · 법적 개발가능 규모</p>
         <div className="report-grid">
           <div className="report-map-placeholder"><div><strong>선택 필지 지도영역</strong><span>Part 1 선택필지 {parcelCount || "-"}개 · PNU 기반 연계</span></div></div>
           <div className="report-card"><h3>대지 개요</h3>
@@ -643,7 +643,11 @@ export default function ReportPage() {
             </div>
           </div>
         </div>
-        <div className="report-section"><div className="report-section-head"><div><span>PART 1</span><br /><strong>개발가능 규모</strong></div></div>
+        <div className="report-grid">
+          <div className="report-card"><h3>소유권 Gate</h3><Metric label="판정" value={ownershipGate} />{records.map((row, i) => <div className="report-owner-row" key={`${row.pnu}-${i}`}><strong>{row.ownerTypeLabel} · {row.ownerClass}</strong><span>{row.legalDong} {row.jibun}</span></div>)}</div>
+          <div className="report-card"><h3>협의대상자</h3><p>1차 · 토지 소유기관</p><p>2차 · 재산관리관·관리권자·운영주체</p><p>3차 · 관리·처분·개발 의사결정권자</p><div className="report-warning">공개 소유정보로 실제 기관명·재산관리관이 확정되지 않으면 “확인 필요”로 유지합니다.</div></div>
+        </div>
+        <div className="report-section"><div className="report-section-head"><div><span>LEGAL CAPACITY</span><br /><strong>법적 개발가능 규모</strong></div></div>
           <table className="report-table"><thead><tr><th>구분</th>{DEVELOPMENT_SCENARIOS.map((s) => <th key={s.key}>{s.label}</th>)}</tr></thead><tbody>
             <tr><td className="left">지상 개발가능 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.aboveGroundGfa || null)}</td>)}</tr>
             <tr><td className="left">지하 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.undergroundGfa)}</td>)}</tr>
@@ -655,65 +659,13 @@ export default function ReportPage() {
               : "건축HUB에서 유효한 지상·지하 층별 면적을 찾지 못해 지하 비율은 자동 추정하지 않았습니다."}
           </div>
         </div>
-        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
-          <div className="report-form-grid">
-            <Field label="지하/지상 비율 %" value={assumptions.basementRatioPct} onChange={(v) => setAssumption("basementRatioPct", v)} />
-            <Field label="표준공사비 원/㎡" value={assumptions.constructionCostPerSqm} onChange={(v) => setAssumption("constructionCostPerSqm", v)} />
-            <Field label="시장 임대료 원/㎡·월" value={assumptions.monthlyRentPerSqm} onChange={(v) => setAssumption("monthlyRentPerSqm", v)} />
-            <Field label="OPEX / 매출 %" value={assumptions.opexPct} onChange={(v) => setAssumption("opexPct", v)} />
-            <Field label="시장 기준금리 %" value={assumptions.referenceRatePct} onChange={(v) => setAssumption("referenceRatePct", v)} />
-            <Field label="PF Spread %" value={assumptions.pfSpreadPct} onChange={(v) => setAssumption("pfSpreadPct", v)} />
-            <Field label="Debt Ratio %" value={assumptions.debtRatioPct} onChange={(v) => setAssumption("debtRatioPct", v)} />
-            <Field label="Debt Tenor 년" value={assumptions.debtTenorYears} onChange={(v) => setAssumption("debtTenorYears", v)} />
-            <Field label="출자자 요구수익률 %" value={assumptions.investorRequiredReturnPct} onChange={(v) => setAssumption("investorRequiredReturnPct", v)} />
-          </div>
-          <div className="report-field" style={{ marginTop: 12 }}><label>가동률 {assumptions.occupancyPct}% · 80~95%, 1% 단위</label><input type="range" min={80} max={95} step={1} value={assumptions.occupancyPct} onChange={(e) => setAssumption("occupancyPct", Number(e.target.value))} /></div>
-
-          {financeDefaultsError && <div className="report-warning">{financeDefaultsError}</div>}
-          {financeDefaults && (
-            <div className="report-note" style={{ marginTop: 12 }}>
-              <strong>금융 가정 출처</strong>
-              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-                {financeDefaults.sources.map((source) => (
-                  <li key={source.metricCode}>
-                    {source.metricCode} {source.value ?? "-"}
-                    {source.unit === "pct" || source.unit === "%" ? "%" : ""}
-                    {source.range.low !== null && source.range.high !== null
-                      ? ` (범위 ${source.range.low}~${source.range.high})`
-                      : ""}
-                    {" — "}
-                    {source.publisher ?? "출처 미상"}
-                    {source.reportName ? `, ${source.reportName}` : ""}
-                    {source.baseDate ? ` (${source.baseDate})` : ""}
-                    {source.note ? ` · ${source.note}` : ""}
-                  </li>
-                ))}
-              </ul>
-              {financeDefaults.warnings.map((warning) => (
-                <p key={warning} style={{ margin: "8px 0 0" }}>{warning}</p>
-              ))}
-            </div>
-          )}
-
-          <div className="report-note" style={{ marginTop: 10 }}>
-            <strong>판정에 실제로 쓰인 값</strong> — 대출금리 {analysis.financeBasis.appliedRatePct.toFixed(2)}%
-            ({basisLabel(analysis.financeBasis.rateBasis)}) · 차입비율 {analysis.financeBasis.ltcPct}%
-            ({basisLabel(analysis.financeBasis.ltcBasis)})
-            {(analysis.financeBasis.rateBasis === "FALLBACK" || analysis.financeBasis.ltcBasis === "FALLBACK") && (
-              <> — 출처가 없는 최후 기본값이 섞여 있습니다. 대외 자료로 쓰기 전에 조달 조건을 확정해 주세요.</>
-            )}
-          </div>
-        </div>
         <div className="report-page-number">1 / 3</div>
       </section>
 
       <section className="report-page">
-        <div className="report-kicker">02 · OWNERSHIP / DEMAND</div>
-        <h2 className="report-title">소유·협의대상과 시설수요</h2>
-        <div className="report-grid">
-          <div className="report-card"><h3>소유권 Gate</h3><Metric label="판정" value={ownershipGate} />{records.map((row, i) => <div className="report-owner-row" key={`${row.pnu}-${i}`}><strong>{row.ownerTypeLabel} · {row.ownerClass}</strong><span>{row.legalDong} {row.jibun}</span></div>)}</div>
-          <div className="report-card"><h3>협의대상자</h3><p>1차 · 토지 소유기관</p><p>2차 · 재산관리관·관리권자·운영주체</p><p>3차 · 관리·처분·개발 의사결정권자</p><div className="report-warning">공개 소유정보로 실제 기관명·재산관리관이 확정되지 않으면 “확인 필요”로 유지합니다.</div></div>
-        </div>
+        <div className="report-kicker">02 · PROGRAM — 시설 구성</div>
+        <h2 className="report-title">수요시설과 적용 임대료</h2>
+        <p className="report-subtitle">시설별 수요면적 · 위치에 맞춘 임대료 근거 · 개발규모별 공사비</p>
         <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
           <div className="report-demand-grid"><Field label="PUBLIC Required GFA ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
         </div>
@@ -828,49 +780,91 @@ export default function ReportPage() {
       </section>
 
       <section className="report-page">
-        <div className="report-kicker">03 · PPP FEASIBILITY / GO-NO GO</div>
+        <div className="report-kicker">03 · FEASIBILITY — 사업성 판정</div>
         <h2 className="report-title">사업성 매트릭스와 추진여부</h2>
         <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 5% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
+        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
+          <div className="report-form-grid">
+            <Field label="지하/지상 비율 %" value={assumptions.basementRatioPct} onChange={(v) => setAssumption("basementRatioPct", v)} />
+            <Field label="표준공사비 원/㎡" value={assumptions.constructionCostPerSqm} onChange={(v) => setAssumption("constructionCostPerSqm", v)} />
+            <Field label="시장 임대료 원/㎡·월" value={assumptions.monthlyRentPerSqm} onChange={(v) => setAssumption("monthlyRentPerSqm", v)} />
+            <Field label="OPEX / 매출 %" value={assumptions.opexPct} onChange={(v) => setAssumption("opexPct", v)} />
+            <Field label="시장 기준금리 %" value={assumptions.referenceRatePct} onChange={(v) => setAssumption("referenceRatePct", v)} />
+            <Field label="PF Spread %" value={assumptions.pfSpreadPct} onChange={(v) => setAssumption("pfSpreadPct", v)} />
+            <Field label="Debt Ratio %" value={assumptions.debtRatioPct} onChange={(v) => setAssumption("debtRatioPct", v)} />
+            <Field label="Debt Tenor 년" value={assumptions.debtTenorYears} onChange={(v) => setAssumption("debtTenorYears", v)} />
+            <Field label="출자자 요구수익률 %" value={assumptions.investorRequiredReturnPct} onChange={(v) => setAssumption("investorRequiredReturnPct", v)} />
+          </div>
+          <div className="report-field" style={{ marginTop: 12 }}><label>가동률 {assumptions.occupancyPct}% · 80~95%, 1% 단위</label><input type="range" min={80} max={95} step={1} value={assumptions.occupancyPct} onChange={(e) => setAssumption("occupancyPct", Number(e.target.value))} /></div>
+
+          {financeDefaultsError && <div className="report-warning">{financeDefaultsError}</div>}
+          {financeDefaults && (
+            <div className="report-note" style={{ marginTop: 12 }}>
+              <strong>금융 가정 출처</strong>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {financeDefaults.sources.map((source) => (
+                  <li key={source.metricCode}>
+                    {source.metricCode} {source.value ?? "-"}
+                    {source.unit === "pct" || source.unit === "%" ? "%" : ""}
+                    {source.range.low !== null && source.range.high !== null
+                      ? ` (범위 ${source.range.low}~${source.range.high})`
+                      : ""}
+                    {" — "}
+                    {source.publisher ?? "출처 미상"}
+                    {source.reportName ? `, ${source.reportName}` : ""}
+                    {source.baseDate ? ` (${source.baseDate})` : ""}
+                    {source.note ? ` · ${source.note}` : ""}
+                  </li>
+                ))}
+              </ul>
+              {financeDefaults.warnings.map((warning) => (
+                <p key={warning} style={{ margin: "8px 0 0" }}>{warning}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="report-note" style={{ marginTop: 10 }}>
+            <strong>판정에 실제로 쓰인 값</strong> — 대출금리 {analysis.financeBasis.appliedRatePct.toFixed(2)}%
+            ({basisLabel(analysis.financeBasis.rateBasis)}) · 차입비율 {analysis.financeBasis.ltcPct}%
+            ({basisLabel(analysis.financeBasis.ltcBasis)})
+            {(analysis.financeBasis.rateBasis === "FALLBACK" || analysis.financeBasis.ltcBasis === "FALLBACK") && (
+              <> — 출처가 없는 최후 기본값이 섞여 있습니다. 대외 자료로 쓰기 전에 조달 조건을 확정해 주세요.</>
+            )}
+          </div>
+        </div>
         <div className="report-grid three">
-          <div className="report-card"><h3>토지</h3><Metric label="토지가치" value={formatWon(officialLandValue)} /><Metric label="연 사용료" value={formatWon(analysis.annualLandFee)} /></div>
-          <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="CONDITIONAL" value="1.00 ≤ Min DSCR < 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
-          <div className="report-card"><h3>REITs</h3><Metric label="PASS" value="Project IRR ≥ 6.5%" /><Metric label="CONDITIONAL" value="4.50% ≤ IRR < 6.5%" /><Metric label="출자자 요구" value={assumptions.investorRequiredReturnPct ? `${assumptions.investorRequiredReturnPct}%` : "별도 입력"} /></div>
+          <div className="report-card"><h3>토지</h3>
+            <Metric label="토지가치" value={formatWon(officialLandValue)} />
+            <Metric label="연 사용료 5%" value={formatWon(analysis.annualLandFee)} />
+          </div>
+          <div className="report-card"><h3>사업구조</h3>
+            <Metric label="구조" value={structurePolicy?.policy.structureName ?? "미선택"} />
+            <Metric label="시설 소유" value={structurePolicy?.policy.ownershipDuringOperation ?? "-"} />
+            <Metric label="시설분 재산세" value={structurePolicy?.policy.propertyTaxApplies ? "부담" : "없음"} />
+          </div>
+          <div className="report-card"><h3>판정 기준</h3>
+            <Metric label="DSCR 기준" value={`≥ ${analysis.dscrPassMin.toFixed(2)}`} />
+            <Metric label="Project IRR 기준" value="≥ 6.5%" />
+            <Metric label="잔존가 처리" value={structurePolicy?.policy.terminalValuePolicy === "EXIT_VALUE" ? "Exit Value" : "0 (귀속·반환)"} />
+          </div>
         </div>
         {structurePolicy && (
-          <div className="report-section">
-            <div className="report-section-head">
-              <div><span>STRUCTURE</span><br /><strong>선택된 사업구조</strong></div>
-              <span className="report-status conditional">{structurePolicy.policy.structureName}</span>
-            </div>
-            <div className="report-grid three">
-              <div className="report-card">
-                <h3>판정 기준</h3>
-                <Metric label="DSCR 기준" value={analysis.dscrPassMin.toFixed(2)} />
-                <Metric label="잔존가 처리" value={structurePolicy.policy.terminalValuePolicy === "EXIT_VALUE" ? "Exit Value" : "0 (귀속·반환)"} />
-              </div>
-              <div className="report-card">
-                <h3>세무 처리</h3>
-                <Metric label="시설 소유" value={structurePolicy.policy.ownershipDuringOperation ?? "-"} />
-                <Metric label="시설분 재산세" value={structurePolicy.policy.propertyTaxApplies ? "부담" : "없음"} />
-              </div>
-              <div className="report-card">
-                <h3>선택 경로</h3>
-                <p>{structurePolicy.resolved.reason}</p>
-              </div>
-            </div>
-            {structurePolicy.unmodelled.length > 0 && (
-              <div className="report-warning">
-                <strong>아직 현금흐름에 반영되지 않은 항목</strong>
-                <ul className="unresolved-list" style={{ marginTop: 8 }}>
-                  {structurePolicy.unmodelled.map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </div>
-            )}
+          <div className="report-source" style={{ marginTop: -6, marginBottom: 12 }}>
+            구조 선택 경로 — {structurePolicy.resolved.reason}
           </div>
         )}
 
-        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "참고" : "적용"}</span><br /><strong>Minimum DSCR Matrix</strong></div><span className="report-source">기준 DSCR {analysis.dscrPassMin.toFixed(2)}</span></div><Matrix mode="BTO" analysis={analysis} /></div>
-        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "적용" : "참고"}</span><br /><strong>Project IRR Matrix</strong></div></div><Matrix mode="REITS" analysis={analysis} /></div>
+        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "참고" : "적용"}</span><br /><strong>Minimum DSCR Matrix</strong></div><span className="report-source">PASS ≥ {analysis.dscrPassMin.toFixed(2)} · CONDITIONAL 1.00 이상</span></div><Matrix mode="BTO" analysis={analysis} /></div>
+        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "적용" : "참고"}</span><br /><strong>Project IRR Matrix</strong></div><span className="report-source">PASS ≥ 6.5% · CONDITIONAL 4.50% 이상{assumptions.investorRequiredReturnPct ? ` · 출자자 요구 ${assumptions.investorRequiredReturnPct}%` : ""}</span></div><Matrix mode="REITS" analysis={analysis} /></div>
+
+        {structurePolicy && structurePolicy.unmodelled.length > 0 && (
+          <div className="report-warning">
+            <strong>아직 현금흐름에 반영되지 않은 항목</strong>
+            <ul className="unresolved-list" style={{ marginTop: 8 }}>
+              {structurePolicy.unmodelled.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
         <div className="report-section report-verdict"><span className={`report-status ${statusTone(finalDecision.status)}`}>{finalDecision.status}</span><strong>{finalDecision.title}</strong><p>{finalDecision.text}</p>{recommendation && <p><b>우선 검토:</b> {recommendation.scenarioLabel} / {recommendation.term}년 · BTO/BOT {recommendation.btoBotStatus} · REITs {recommendation.reitsStatus}</p>}</div>
         <div className="report-note">실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing, 실제 임대료·OPEX·금리·Lifecycle CAPEX를 반영해 확정합니다. REITs의 6.5%는 INRealtyLab 내부 Project IRR 판정기준(공통 목표수익률)이며, DSCR·IRR 중 하나라도 CONDITIONAL/FAIL이면 종합판정도 그에 따라 조건부 가능/불가로 표시됩니다.</div>
         <div className="report-page-number">3 / 3</div>
