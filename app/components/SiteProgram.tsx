@@ -192,20 +192,35 @@ export default function SiteProgram() {
               source: data.source,
             });
           }
-          // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설을 걸러낼 때 쓴다.
+          // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설과 면적 상한을 걸러낼 때 쓴다.
+          const facilities: AllowedUseFacility[] = data.facilities ?? [];
+          const allowedKeys = facilities
+            .filter(
+              (facility) =>
+                facility.decision === "ALLOWED" ||
+                facility.decision === "CONDITIONAL" ||
+                facility.decision === "REVIEW"
+            )
+            .map((facility) => facility.key);
+          // 조례가 정한 용도별 바닥면적 상한. 이게 없으면 제2종일반주거에
+          // 오피스 3,700㎡ 같은 애초에 불가능한 규모를 제안하게 된다.
+          const useLimits: Record<string, { decision: AllowedUseDecision; maxGfaSqm: number | null }> = {};
+          for (const facility of facilities) {
+            useLimits[facility.key] = {
+              decision: facility.decision,
+              maxGfaSqm: facility.maxGfaSqm ?? null,
+            };
+          }
           try {
-            const allowedKeys = (data.facilities ?? [])
-              .filter(
-                (facility: AllowedUseFacility) =>
-                  facility.decision === "ALLOWED" ||
-                  facility.decision === "CONDITIONAL" ||
-                  facility.decision === "REVIEW"
-              )
-              .map((facility: AllowedUseFacility) => facility.key);
             sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
+            sessionStorage.setItem("inrealtylab.step2UseLimits", JSON.stringify(useLimits));
           } catch {
             // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
           }
+          // 허용용도 조회는 비동기라 ProgramChoice가 먼저 뜬다. 끝났다고 알려준다.
+          window.dispatchEvent(
+            new CustomEvent("inrealtylab:allowedUse", { detail: { keys: allowedKeys, limits: useLimits } })
+          );
         } catch (error) {
           if (!cancelled) setAllowedUseError(error instanceof Error ? error.message : "건축 가능시설 조회에 실패했습니다.");
         }

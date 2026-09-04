@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 const ALLOWED_KEY = "inrealtylab.step2AllowedUse";
+const LIMITS_KEY = "inrealtylab.step2UseLimits";
 const SNAPSHOT_KEY = "inrealtylab.part1Snapshot";
 const STORAGE_KEY = "inrealtylab.step2Program";
 
@@ -63,6 +64,9 @@ const SCENARIOS = [
 
 const RECOMMENDED_SCENARIO = "BASE";
 
+type UseLimit = { decision: "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW"; maxGfaSqm: number | null };
+type UseLimits = Record<string, UseLimit>;
+
 type ProgramSelection = {
   scenarioCode: string;
   commercial: Partial<Record<CommercialCode, number>>;
@@ -85,6 +89,56 @@ function readAllowedKeys(): string[] | null {
   }
 }
 
+function readUseLimits(): UseLimits {
+  try {
+    const raw = sessionStorage.getItem(LIMITS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as UseLimits) : {};
+  } catch {
+    return {};
+  }
+}
+
+// 한 시설(C코드)은 여러 법정 용도에서 나올 수 있다(예: 리테일 ← 판매시설·제1종근생·제2종근생).
+// 그중 가장 넉넉한 상한을 쓴다. 하나라도 상한이 없으면 상한 없음으로 본다.
+function capFor(facility: CommercialFacility, allowedKeys: string[], limits: UseLimits): number | null {
+  const usable = facility.allowedFrom.filter((key) => allowedKeys.includes(key));
+  if (!usable.length) return null;
+  let best: number | null = 0;
+  for (const key of usable) {
+    const cap = limits[key]?.maxGfaSqm ?? null;
+    if (cap === null) return null;
+    best = Math.max(best ?? 0, cap);
+  }
+  return best && best > 0 ? best : null;
+}
+
+// 상한이 붙은 법정 용도만 골라 보여준다. 예를 들어 리테일은 근생으로 구성하면 상한이 없지만
+// 판매시설로 구성하면 조례상 2천㎡ 미만이다. 둘 다 알려줘야 오해가 없다.
+function cappedSources(facility: CommercialFacility, allowedKeys: string[], limits: UseLimits) {
+  return facility.allowedFrom
+    .filter((key) => allowedKeys.includes(key))
+    .map((key) => ({ key, cap: limits[key]?.maxGfaSqm ?? null }))
+    .filter((item): item is { key: string; cap: number } => typeof item.cap === "number" && item.cap > 0);
+}
+
+const USE_LABEL: Record<string, string> = {
+  OFFICE_GENERAL: "업무시설",
+  PUBLIC_OFFICE: "공공업무시설",
+  RETAIL: "판매시설",
+  NEIGHBORHOOD_1: "제1종 근린생활시설",
+  NEIGHBORHOOD_2: "제2종 근린생활시설",
+  HOSPITALITY: "숙박시설",
+  LIVING: "공동주택",
+  MEDICAL: "의료시설",
+  EDUCATION_RESEARCH: "교육연구시설",
+  CULTURE_ASSEMBLY: "문화 및 집회시설",
+  SPORTS: "운동시설",
+  LOGISTICS: "창고시설",
+  DIGITAL_INFRA: "방송통신시설",
+};
+
 function readAboveGroundGfa(): number {
   try {
     const raw = sessionStorage.getItem(SNAPSHOT_KEY);
@@ -100,26 +154,63 @@ function readAboveGroundGfa(): number {
 
 // 허용된 시설 중 우선순위 상위 둘에 70:30을 제안한다.
 // 실제 수요 데이터(demand_observation·facility_demand_weight) 연결은 다음 작업.
-function recommend(available: CommercialFacility[]): Partial<Record<CommercialCode, number>> {
+function recommend(
+  available: CommercialFacility[],
+  maxPctOf: (facility: CommercialFacility) => number
+): Partial<Record<CommercialCode, number>> {
   if (!available.length) return {};
-  if (available.length === 1) return { [available[0].code]: 100 };
-  return { [available[0].code]: 70, [available[1].code]: 30 };
+
+  const plan: Partial<Record<CommercialCode, number>> = {};
+  let remaining = 100;
+
+  // 우선순위 순으로 70:30을 시도하되, 각 시설의 면적 상한을 넘기지 않는다.
+  const shares = available.length === 1 ? [100] : [70, 30];
+  for (let index = 0; index < shares.length && index < available.length; index += 1) {
+    const facility = available[index];
+    const value = Math.min(shares[index], maxPctOf(facility), remaining);
+    plan[facility.code] = value;
+    remaining -= value;
+  }
+
+  // 상한 때문에 남은 몫은 아직 여유가 있는 다음 시설들이 이어받는다.
+  if (remaining > 0) {
+    for (const facility of available) {
+      if (remaining <= 0) break;
+      const current = plan[facility.code] ?? 0;
+      const room = Math.max(0, maxPctOf(facility) - current);
+      if (room <= 0) continue;
+      const add = Math.min(room, remaining);
+      plan[facility.code] = current + add;
+      remaining -= add;
+    }
+  }
+
+  return plan;
 }
 
 export default function ProgramChoice() {
   const [allowedKeys, setAllowedKeys] = useState<string[] | null>(null);
+  const [useLimits, setUseLimits] = useState<UseLimits>({});
   const [aboveGroundGfa, setAboveGroundGfa] = useState(0);
   const [selection, setSelection] = useState<ProgramSelection | null>(null);
 
   useEffect(() => {
     setAllowedKeys(readAllowedKeys());
+    setUseLimits(readUseLimits());
     setAboveGroundGfa(readAboveGroundGfa());
 
     // STEP 2의 허용용도 조회는 비동기라 이 컴포넌트가 뜬 뒤에 끝난다.
     // 끝났다는 신호를 받으면 그때 다시 읽는다.
     function onAllowedUse(event: Event) {
       const detail = (event as CustomEvent).detail;
-      if (Array.isArray(detail)) setAllowedKeys(detail as string[]);
+      if (Array.isArray(detail)) {
+        // 예전 형태(키 배열)도 계속 받는다.
+        setAllowedKeys(detail as string[]);
+        setUseLimits(readUseLimits());
+      } else if (detail && typeof detail === "object") {
+        if (Array.isArray(detail.keys)) setAllowedKeys(detail.keys as string[]);
+        if (detail.limits) setUseLimits(detail.limits as UseLimits);
+      }
       setAboveGroundGfa(readAboveGroundGfa());
     }
 
@@ -127,22 +218,36 @@ export default function ProgramChoice() {
     return () => window.removeEventListener("inrealtylab:allowedUse", onAllowedUse);
   }, []);
 
-  // 조회 결과에 "가능·조건부"가 하나도 없으면 그건 전부 불가라는 뜻이 아니라
-  // 행위코드 판정이 아직 안 끝났다는 뜻이다. 그 둘을 섞으면 화면이 거짓말을 한다.
-  const undecided = allowedKeys !== null && allowedKeys.length === 0;
-
   const available = useMemo(() => {
     if (!allowedKeys) return [];
-    if (undecided) return [...COMMERCIAL].sort((a, b) => a.priority - b.priority);
     return COMMERCIAL
       .filter((facility) => facility.allowedFrom.some((key) => allowedKeys.includes(key)))
       .sort((a, b) => a.priority - b.priority);
-  }, [allowedKeys, undecided]);
+  }, [allowedKeys]);
 
   const blocked = useMemo(() => {
-    if (!allowedKeys || undecided) return [];
+    if (!allowedKeys) return [];
     return COMMERCIAL.filter((facility) => !facility.allowedFrom.some((key) => allowedKeys.includes(key)));
-  }, [allowedKeys, undecided]);
+  }, [allowedKeys]);
+
+  const scenario = SCENARIOS.find((item) => item.code === selection?.scenarioCode) ?? SCENARIOS[1];
+  const commercialGfa = aboveGroundGfa * (scenario.commercialPct / 100);
+  const publicGfa = aboveGroundGfa * (scenario.publicPct / 100);
+  // 조례 상한(㎡)을 수익시설 배분 비율(%)로 환산한다.
+  const capsSqm = useMemo(() => {
+    const map = new Map<CommercialCode, number | null>();
+    if (!allowedKeys) return map;
+    for (const facility of COMMERCIAL) map.set(facility.code, capFor(facility, allowedKeys, useLimits));
+    return map;
+  }, [allowedKeys, useLimits]);
+
+  const maxPctOf = useMemo(() => {
+    return (facility: CommercialFacility) => {
+      const cap = capsSqm.get(facility.code) ?? null;
+      if (cap === null || commercialGfa <= 0) return 100;
+      return Math.max(0, Math.min(100, Math.floor((cap / commercialGfa) * 100)));
+    };
+  }, [capsSqm, commercialGfa]);
 
   // 1차 제안을 만들거나, 저장해둔 사용자 수정본을 되살린다.
   useEffect(() => {
@@ -150,24 +255,19 @@ export default function ProgramChoice() {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const saved = JSON.parse(raw) as ProgramSelection;
-        // 시설이 하나도 안 담긴 저장본은 고를 게 없던 시절의 잔재다.
-        // 그대로 되살리면 합계 0%로 멈추므로 다시 제안한다.
-        if (saved.commercial && Object.keys(saved.commercial).length > 0) {
-          setSelection(saved);
-          return;
-        }
+        setSelection(JSON.parse(raw) as ProgramSelection);
+        return;
       }
     } catch {
       // 저장본을 못 읽으면 새로 제안한다.
     }
     setSelection({
       scenarioCode: RECOMMENDED_SCENARIO,
-      commercial: recommend(available),
+      commercial: recommend(available, maxPctOf),
       publicFacilities: ["P_R_PARKING", "P_NR_SOCIAL_WELFARE_CENTER"],
       touched: [],
     });
-  }, [allowedKeys, available]);
+  }, [allowedKeys, available, maxPctOf]);
 
   useEffect(() => {
     if (!selection) return;
@@ -178,9 +278,7 @@ export default function ProgramChoice() {
     }
   }, [selection]);
 
-  const scenario = SCENARIOS.find((item) => item.code === selection?.scenarioCode) ?? SCENARIOS[1];
-  const commercialGfa = aboveGroundGfa * (scenario.commercialPct / 100);
-  const publicGfa = aboveGroundGfa * (scenario.publicPct / 100);
+
 
   const commercialTotal = useMemo(() => {
     if (!selection) return 0;
@@ -191,7 +289,9 @@ export default function ProgramChoice() {
   function setCommercialPct(code: CommercialCode, nextValue: number) {
     setSelection((current) => {
       if (!current) return current;
-      const value = Math.max(0, Math.min(100, Math.round(nextValue)));
+      const facility = COMMERCIAL.find((item) => item.code === code);
+      const ceiling = facility ? maxPctOf(facility) : 100;
+      const value = Math.max(0, Math.min(ceiling, Math.round(nextValue)));
       const touched = current.touched.includes(code) ? current.touched : [...current.touched, code];
       const entries = Object.keys(current.commercial) as CommercialCode[];
       const others = entries.filter((item) => item !== code && !touched.includes(item));
@@ -249,7 +349,7 @@ export default function ProgramChoice() {
   function resetToRecommended() {
     setSelection({
       scenarioCode: RECOMMENDED_SCENARIO,
-      commercial: recommend(available),
+      commercial: recommend(available, maxPctOf),
       publicFacilities: ["P_R_PARKING", "P_NR_SOCIAL_WELFARE_CENTER"],
       touched: [],
     });
@@ -267,6 +367,12 @@ export default function ProgramChoice() {
   if (!selection) return null;
 
   const selectedCodes = Object.keys(selection.commercial) as CommercialCode[];
+  // 허용 용도들의 상한을 다 합쳐도 수익시설 연면적에 못 미치는지 본다.
+  const capacityShortfall =
+    commercialGfa > 0 &&
+    available.length > 0 &&
+    available.every((facility) => (capsSqm.get(facility.code) ?? null) !== null) &&
+    available.reduce((sum, facility) => sum + (capsSqm.get(facility.code) ?? 0), 0) < commercialGfa;
   const addable = available.filter((facility) => selection.commercial[facility.code] === undefined);
   const totalOk = commercialTotal === 100;
 
@@ -284,13 +390,6 @@ export default function ProgramChoice() {
       <p className="choice-hint">
         수요를 기준으로 구성을 먼저 제안했습니다. 각 줄을 바꾸면 손대지 않은 줄이 자동으로 조정돼 합계 100%가 유지됩니다.
       </p>
-
-      {undecided && (
-        <div className="control-warning">
-          이 필지의 행위제한 판정이 확정되지 않아, 우선 전체 시설을 놓고 구성합니다.
-          허용 용도가 확인되면 고를 수 있는 시설이 그에 맞게 좁혀집니다.
-        </div>
-      )}
 
       {/* ── 시나리오 ── */}
       <div className="choice-grid three">
@@ -342,6 +441,10 @@ export default function ProgramChoice() {
           if (!facility) return null;
           const pct = selection.commercial[code] ?? 0;
           const isTouched = selection.touched.includes(code);
+          const capSqm = capsSqm.get(code) ?? null;
+          const ceilingPct = maxPctOf(facility);
+          const partialCaps = allowedKeys ? cappedSources(facility, allowedKeys, useLimits) : [];
+          const assigned = commercialGfa * (pct / 100);
           return (
             <div className={`program-row${isTouched ? " touched" : ""}`} key={code}>
               <div className="program-row-head">
@@ -349,6 +452,7 @@ export default function ProgramChoice() {
                 <strong>{facility.label}</strong>
                 <span className="program-model">{facility.businessModel}</span>
                 {isTouched ? <em className="choice-tag dark">직접 수정함</em> : <em className="choice-tag">추천</em>}
+                {capSqm !== null && <em className="choice-tag cap">상한 {formatArea(capSqm)}</em>}
                 <button type="button" className="program-remove" onClick={() => removeFacility(code)}>제거</button>
               </div>
               <div className="program-row-input">
@@ -362,8 +466,22 @@ export default function ProgramChoice() {
                   onChange={(event) => setCommercialPct(code, Number(event.target.value))}
                 />
                 <strong>{pct}%</strong>
-                <span>{aboveGroundGfa > 0 ? formatArea(commercialGfa * (pct / 100)) : "-"}</span>
+                <span>{aboveGroundGfa > 0 ? formatArea(assigned) : "-"}</span>
               </div>
+              {capSqm !== null && ceilingPct < 100 && (
+                <p className="program-row-note">
+                  조례상 이 용도의 바닥면적 합계는 {formatArea(capSqm)} 미만입니다. 수익시설 {formatArea(commercialGfa)} 기준으로
+                  최대 {ceilingPct}%까지만 배분됩니다.
+                </p>
+              )}
+              {capSqm === null && partialCaps.length > 0 && (
+                <p className="program-row-note">
+                  {partialCaps
+                    .map((item) => `${USE_LABEL[item.key] ?? item.key}로 구성하면 ${formatArea(item.cap)} 미만`)
+                    .join(" · ")}
+                  . 상한이 없는 용도로 구성하면 제한이 없습니다.
+                </p>
+              )}
             </div>
           );
         })}
@@ -372,6 +490,9 @@ export default function ProgramChoice() {
       {!totalOk && (
         <div className="control-warning">
           수익시설 비율 합계가 정확히 100%가 되어야 연면적 배분이 확정됩니다. 지금은 {commercialTotal}%입니다.
+          {capacityShortfall && (
+            <> 이 필지는 허용 용도별 바닥면적 상한을 다 합쳐도 수익시설 연면적을 채우지 못합니다. 규모를 줄이거나 공공시설 비중을 높이는 시나리오를 검토해야 합니다.</>
+          )}
         </div>
       )}
 
