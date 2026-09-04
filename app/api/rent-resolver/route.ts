@@ -166,6 +166,36 @@ function score(row: ResolvedRentRow, submarket: string | null) {
 }
 
 const RETAIL_SUBTYPES = ["중대형상가", "소규모상가", "집합상가"];
+const HOUSING_TYPES = ["아파트", "종합", "연립다세대", "단독주택"];
+
+/**
+ * PNU 앞 2자리 → 한국부동산원 주택가격동향 시도 지역코드.
+ * 강원(42→51)·전북(45→52)은 특별자치도 전환으로 코드가 바뀌어 두 값을 모두 받는다.
+ * 광주·전남은 이 조사에서 12002·12001로 매겨져 있어 PNU 코드와 다르다.
+ */
+const HOUSING_SIDO_CODE: Record<string, string> = {
+  "11": "11000", "26": "26000", "27": "27000", "28": "28000", "29": "12002",
+  "30": "30000", "31": "31000", "36": "36000", "41": "41000", "42": "51000",
+  "43": "43000", "44": "44000", "45": "52000", "46": "12001", "47": "47000",
+  "48": "48000", "50": "50000", "51": "51000", "52": "52000",
+};
+
+type HousingRentRow = {
+  geography_level: string;
+  geography_name: string;
+  geography_code: string;
+  housing_type: string;
+  stat_kind: string;
+  conversion_rate_pct: number;
+  rate_source_geography: string;
+  rate_source_housing_type: string;
+  rent_per_sqm_month_exclusive: number;
+  rent_krw_unit_month: number;
+  jeonse_price_per_sqm_krw: number;
+  base_month: string;
+  report_name: string | null;
+  source_page: string | null;
+};
 
 /** '서울 공덕역'과 '공덕역'을 같은 상권으로 본다. */
 function normalizeAreaName(name: string) {
@@ -331,6 +361,111 @@ async function resolveRetail(
   };
 }
 
+type HousingResolution = {
+  housingType: string;
+  statKind: string;
+  rentPerSqmMonthExclusive: number;
+  rentKrwUnitMonth: number;
+  geographyName: string;
+  geographyCode: string;
+  geographyLevel: string;
+  matchBasis: string;
+  conversionRatePct: number;
+  rateSource: string;
+  jeonsePerSqmKrw: number;
+  baseMonth: string;
+  report: string | null;
+  sourcePage: string | null;
+  areaBasis: string;
+  notes: string[];
+};
+
+/**
+ * 주거시설 임대료를 필지 위치에 맞춰 고른다.
+ *
+ * 임대료 수준값이 원 단위로 공표되지 않기 때문에 ㎡당 전세가격에 전월세전환율을 적용한다.
+ *   임대료 = ㎡당 전세가격 × 전월세전환율 ÷ 12
+ * 보고서가 정의한 전월세전환율 산식을 그대로 뒤집은 것이라 별도 가정이 들어가지 않는다.
+ *
+ * 결과는 전용면적 기준이다. GFA 환산은 엔진의 시설별 efficiency(C04_LIVING 0.70)가 이미
+ * 맡고 있으므로 여기서 다시 곱하면 안 된다.
+ */
+async function resolveHousing(
+  url: string,
+  options: { pnu: string; housingType: string; statKind: string }
+): Promise<HousingResolution | null> {
+  const { pnu, housingType, statKind } = options;
+
+  const query = new URLSearchParams({
+    select:
+      "geography_level,geography_name,geography_code,housing_type,stat_kind,conversion_rate_pct,rate_source_geography,rate_source_housing_type,rent_per_sqm_month_exclusive,rent_krw_unit_month,jeonse_price_per_sqm_krw,base_month,report_name,source_page",
+    housing_type: `eq.${housingType}`,
+    stat_kind: `eq.${statKind}`,
+  });
+
+  const response = await fetch(`${url}/rest/v1/part3_housing_rent_resolved?${query.toString()}`, {
+    cache: "no-store",
+    headers: supabasePublicHeaders({ Accept: "application/json" }),
+  });
+  if (!response.ok) return null;
+
+  const rows = ((await response.json()) as HousingRentRow[]).filter((row) =>
+    Number.isFinite(Number(row.rent_per_sqm_month_exclusive))
+  );
+  if (!rows.length) return null;
+
+  const byCode = new Map(rows.map((row) => [row.geography_code, row]));
+  const notes: string[] = [];
+  let chosen: HousingRentRow | undefined;
+  let matchBasis = "";
+
+  // 시군구 → 시도 → 전국. 시군구가 있으면 그게 가장 정확하다(서초구와 노원구가 2배 넘게 벌어진다).
+  const sigungu = pnu.slice(0, 5);
+  if (/^\d{5}$/.test(sigungu) && byCode.has(sigungu)) {
+    chosen = byCode.get(sigungu);
+    matchBasis = "PNU 시군구코드";
+  }
+  if (!chosen) {
+    const sidoCode = HOUSING_SIDO_CODE[pnu.slice(0, 2)];
+    if (sidoCode && byCode.has(sidoCode)) {
+      chosen = byCode.get(sidoCode);
+      matchBasis = "PNU 시도코드 (시군구 자료 없음)";
+      notes.push("이 시군구는 조사 대상에 없어 시도 평균을 적용했습니다.");
+    }
+  }
+  if (!chosen && byCode.has("00000")) {
+    chosen = byCode.get("00000");
+    matchBasis = "전국 평균 (위치 매칭 실패)";
+    notes.push("필지 위치를 지역에 연결하지 못해 전국 평균을 적용했습니다.");
+  }
+  if (!chosen) return null;
+
+  if (chosen.rate_source_geography !== chosen.geography_name) {
+    notes.push(
+      `전월세전환율은 ${chosen.rate_source_geography} ${chosen.rate_source_housing_type} 값 ${chosen.conversion_rate_pct}%를 적용했습니다. 아파트 전환율은 전국·수도권·지방·서울 네 곳만 공표됩니다.`
+    );
+  }
+
+  return {
+    housingType: chosen.housing_type,
+    statKind: chosen.stat_kind,
+    rentPerSqmMonthExclusive: Math.round(Number(chosen.rent_per_sqm_month_exclusive)),
+    rentKrwUnitMonth: Math.round(Number(chosen.rent_krw_unit_month)),
+    geographyName: chosen.geography_name,
+    geographyCode: chosen.geography_code,
+    geographyLevel: chosen.geography_level,
+    matchBasis,
+    conversionRatePct: Number(chosen.conversion_rate_pct),
+    rateSource: `${chosen.rate_source_geography} ${chosen.rate_source_housing_type}`,
+    jeonsePerSqmKrw: Math.round(Number(chosen.jeonse_price_per_sqm_krw)),
+    baseMonth: chosen.base_month,
+    report: chosen.report_name,
+    sourcePage: chosen.source_page,
+    areaBasis: "전용면적",
+    notes,
+  };
+}
+
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const pnu = params.get("pnu")?.trim() ?? "";
@@ -342,6 +477,10 @@ export async function GET(request: NextRequest) {
   const retailSubtype = RETAIL_SUBTYPES.includes(requestedSubtype) ? requestedSubtype : "중대형상가";
   const retailFloors = intParam(params.get("retailFloors"), 1);
   const retailBasementFloors = intParam(params.get("retailBasementFloors"), 0);
+
+  const requestedHousing = params.get("housingType")?.trim() || "";
+  const housingType = HOUSING_TYPES.includes(requestedHousing) ? requestedHousing : "아파트";
+  const housingStat = params.get("housingStat") === "MEDIAN" ? "MEDIAN" : "MEAN";
 
   try {
     const { url } = supabasePublicConfig();
@@ -425,6 +564,27 @@ export async function GET(request: NextRequest) {
       else facilities.push(entry);
     }
 
+    // 주거: ㎡당 전세가격 × 전월세전환율로 만든 전용면적 기준 임대료.
+    const housing = await resolveHousing(url, { pnu, housingType, statKind: housingStat });
+
+    if (housing) {
+      const existing = facilities.findIndex((item) => item.facilityCode === "C04_LIVING");
+      const entry = {
+        facilityCode: "C04_LIVING",
+        rentPerSqmMonth: housing.rentPerSqmMonthExclusive,
+        rentKind: "NOMINAL",
+        geography: housing.geographyName,
+        sampleCount: 1,
+        baseDate: housing.baseMonth,
+        source: housing.report,
+        originTable: "part3_housing_rent_resolved",
+        matchedSubmarket: housing.geographyLevel === "SIGUNGU",
+        alternatives: existing >= 0 ? facilities[existing].alternatives : [],
+      };
+      if (existing >= 0) facilities[existing] = entry;
+      else facilities.push(entry);
+    }
+
     // 시설은 있는데 임대료 자료가 없는 것들. 매출이 0으로 잡히는 원인이라 명시한다.
     const covered = new Set(facilities.map((item) => item.facilityCode));
     const missing = [
@@ -446,9 +606,10 @@ export async function GET(request: NextRequest) {
       sido: pnu ? sidoFromPnu(pnu) : null,
       facilities,
       retail,
+      housing,
       missing,
       note:
-        "원/평·월 자료는 3.305785로 나눠 원/㎡·월로 통일했습니다. 실질임대료(EFFECTIVE)가 있으면 호가(ASKING)보다 먼저 씁니다. 리테일은 한국부동산원 1층 기준 임대료에 층별 효용비율을 적용한 건물 평균값입니다.",
+        "원/평·월 자료는 3.305785로 나눠 원/㎡·월로 통일했습니다. 실질임대료(EFFECTIVE)가 있으면 호가(ASKING)보다 먼저 씁니다. 리테일은 한국부동산원 1층 기준 임대료에 층별 효용비율을 적용한 건물 평균값이고, 주거는 ㎡당 전세가격에 전월세전환율을 적용한 전용면적 기준 값입니다.",
     });
   } catch (error) {
     return NextResponse.json(

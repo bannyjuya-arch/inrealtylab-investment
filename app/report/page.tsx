@@ -151,6 +151,25 @@ type RetailResolution = {
   notes: string[];
 };
 
+type HousingResolution = {
+  housingType: string;
+  statKind: string;
+  rentPerSqmMonthExclusive: number;
+  rentKrwUnitMonth: number;
+  geographyName: string;
+  geographyCode: string;
+  geographyLevel: string;
+  matchBasis: string;
+  conversionRatePct: number;
+  rateSource: string;
+  jeonsePerSqmKrw: number;
+  baseMonth: string;
+  report: string | null;
+  sourcePage: string | null;
+  areaBasis: string;
+  notes: string[];
+};
+
 type RentResolverResponse = {
   ok: boolean;
   submarket: string | null;
@@ -159,9 +178,12 @@ type RentResolverResponse = {
   sido: string | null;
   facilities: RentFacility[];
   retail: RetailResolution | null;
+  housing: HousingResolution | null;
   missing: string[];
   note: string;
 };
+
+const HOUSING_TYPES = ["아파트", "종합", "연립다세대", "단독주택"];
 
 // 한국부동산원 상업용부동산 임대동향조사의 표본 구분을 그대로 따른다.
 // 중대형상가 = 3층 이상이거나 연면적 330㎡ 초과, 소규모상가 = 2층 이하이고 330㎡ 이하.
@@ -243,6 +265,8 @@ export default function ReportPage() {
   const [retailFloors, setRetailFloors] = useState(3);
   const [retailBasementFloors, setRetailBasementFloors] = useState(0);
   const [tradeArea, setTradeArea] = useState("");
+  const [housingType, setHousingType] = useState("아파트");
+  const [housingStat, setHousingStat] = useState<"MEAN" | "MEDIAN">("MEAN");
   // 2026-08-26 확정: 외부 공유용(고객·투자자·지자체)과 내부 관리자 화면을 정식 로그인 기반으로 분리.
   // 로그인하지 않은 상태(기본값)에서는 입력 도구·단가 카드가 CSS(admin-only)로 숨겨지고,
   // 계산 결과(판정 매트릭스 등)만 보인다.
@@ -472,6 +496,8 @@ export default function ReportPage() {
       query.set("retailFloors", String(retailFloors));
       query.set("retailBasementFloors", String(retailBasementFloors));
       if (tradeArea) query.set("tradeArea", tradeArea);
+      query.set("housingType", housingType);
+      query.set("housingStat", housingStat);
 
       try {
         const response = await fetch(`/api/rent-resolver?${query.toString()}`, { cache: "no-store" });
@@ -499,7 +525,7 @@ export default function ReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea]);
+  }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea, housingType, housingStat]);
 
   useEffect(() => {
     if (basementAutoApplied || assumptions.basementRatioPct !== null || basementReference?.ratioPct === null || basementReference?.ratioPct === undefined) return;
@@ -712,6 +738,19 @@ export default function ReportPage() {
             </div>
             <Field label="상가 지상 층수" value={retailFloors} onChange={(v) => setRetailFloors(Math.max(1, parseNumber(v) ?? 1))} />
             <Field label="상가 지하 층수" value={retailBasementFloors} onChange={(v) => setRetailBasementFloors(Math.max(0, parseNumber(v) ?? 0))} />
+            <div className="report-field">
+              <label>주거 유형</label>
+              <select value={housingType} onChange={(e) => setHousingType(e.target.value)}>
+                {HOUSING_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </div>
+            <div className="report-field">
+              <label>주거 통계 기준</label>
+              <select value={housingStat} onChange={(e) => setHousingStat(e.target.value === "MEDIAN" ? "MEDIAN" : "MEAN")}>
+                <option value="MEAN">평균</option>
+                <option value="MEDIAN">중위</option>
+              </select>
+            </div>
           </div>
 
           {rentError && <div className="report-warning">{rentError}</div>}
@@ -742,6 +781,27 @@ export default function ReportPage() {
                     {rent.retail.source ? ` · ${rent.retail.source}` : ""}
                   </div>
                   {[...rent.retail.notes, ...(rent.retail.floorRatio?.notes ?? [])].map((note) => (
+                    <p key={note} style={{ margin: "6px 0 0" }}>{note}</p>
+                  ))}
+                </div>
+              )}
+
+              {rent.housing && (
+                <div className="report-note" style={{ marginTop: 10 }}>
+                  <strong>주거 환산 근거</strong> — {rent.housing.geographyName} {rent.housing.housingType}{" "}
+                  {rent.housing.statKind === "MEAN" ? "평균" : "중위"} ㎡당 전세가격{" "}
+                  {rent.housing.jeonsePerSqmKrw.toLocaleString()}원 × 전월세전환율 {rent.housing.conversionRatePct}% ÷ 12 ={" "}
+                  <strong>{rent.housing.rentPerSqmMonthExclusive.toLocaleString()}원/㎡·월</strong> ({rent.housing.areaBasis} 기준)
+                  <div className="report-source" style={{ marginTop: 6 }}>
+                    매칭 근거 {rent.housing.matchBasis} · 전환율 출처 {rent.housing.rateSource}
+                    {rent.housing.report ? ` · ${rent.housing.report}` : ""}
+                    {rent.housing.sourcePage ? ` ${rent.housing.sourcePage}` : ""} ({rent.housing.baseMonth})
+                    {" · 호당 환산 "}{Math.round(rent.housing.rentKrwUnitMonth / 10000).toLocaleString()}만원/월
+                  </div>
+                  <p style={{ margin: "6px 0 0" }}>
+                    전용면적 기준 값입니다. 연면적 환산은 시설 효율(주거 0.70)이 이미 적용하므로 다시 곱하지 않습니다.
+                  </p>
+                  {rent.housing.notes.map((note) => (
                     <p key={note} style={{ margin: "6px 0 0" }}>{note}</p>
                   ))}
                 </div>
