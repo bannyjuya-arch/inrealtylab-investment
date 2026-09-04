@@ -89,12 +89,38 @@ export type FinancialCell = {
   facilityOperatingLines: FacilityOperatingLine[];
 };
 
+/** STEP 2에서 고른 사업구조. /api/structure-policy가 돌려주는 값을 그대로 받는다. */
+export type StructurePolicy = {
+  structureCode: string;
+  structureName: string;
+  structureGroup: string;
+  terminalValuePolicy: string;
+  usesExitCapRate: boolean;
+  dscrRequired: boolean;
+  dscrMin: number | null;
+  propertyTaxApplies: boolean | null;
+  ownershipDuringOperation: string | null;
+};
+
+/** 금융 가정이 어디서 온 값인지. 화면에서 근거를 표시하기 위해 함께 돌려준다. */
+export type AssumptionBasis = "USER" | "BENCHMARK" | "FALLBACK";
+
+export type FinanceBasis = {
+  appliedRatePct: number;
+  rateBasis: AssumptionBasis;
+  ltcPct: number;
+  ltcBasis: AssumptionBasis;
+};
+
 export type IntegratedAnalysis = {
   totalCommercialSupportableGfa: number | null;
   fullDemandGfa: number | null;
   annualLandFee: number | null;
   capacities: ScenarioCapacity[];
   financialMatrix: FinancialCell[];
+  financeBasis: FinanceBasis;
+  structure: StructurePolicy | null;
+  dscrPassMin: number;
 };
 
 type LinkedPart1Scenario = {
@@ -112,10 +138,20 @@ type CommercialAllocationSnapshot = {
 };
 
 const TOTAL_PROJECT_COST_FACTOR = 1.2;
-const DEFAULT_PF_RATE_PCT = 7.0;
-const DEFAULT_LTC_PCT = 75;
-const MIN_LTC_PCT = 70;
-const MAX_LTC_PCT = 80;
+
+/**
+ * 2026-09-04: 대출금리 7.0% · LTC 75%를 상수로 박아두고 있었는데 둘 다 출처가 없었다.
+ * 게다가 appliedRatePct 계산이 `selectedPfRate ?? (referenceRate + pfSpread)` 형태라
+ * readSelectedPfRatePct()가 항상 숫자를 돌려주는 한 DB 기준값 경로는 한 번도 실행되지 않았다.
+ *
+ * 이제 세션에 사용자가 고른 값이 있을 때만 그 값을 쓰고, 없으면 화면이 /api/underwriting-defaults로
+ * 채워 넣은 assumptions(한국은행 기준금리 + PF 스프레드, 전문가 설문 LTV)를 쓴다.
+ * 둘 다 없을 때만 아래 최후 기본값으로 떨어지며, 그 사실이 판정 결과에 표시된다.
+ */
+const FALLBACK_PF_RATE_PCT = 7.0;
+const FALLBACK_LTC_PCT = 65;
+const MIN_LTC_PCT = 40;
+const MAX_LTC_PCT = 85;
 const LEASE_OCCUPANCY_RATE = 0.95;
 const PILOT_COMMERCIAL_RATIO = 0.60;
 
@@ -186,28 +222,31 @@ function readFacilityRent(facilityCode: string) {
   }
 }
 
-function readSelectedPfRatePct() {
-  if (typeof window === "undefined") return DEFAULT_PF_RATE_PCT;
+/** 사용자가 화면에서 직접 고른 금리. 고르지 않았으면 null을 돌려줘야 DB 기준값이 쓰인다. */
+function readSelectedPfRatePct(): number | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem("inrealtylab.pfRatePct");
-    if (!raw) return DEFAULT_PF_RATE_PCT;
+    if (!raw) return null;
     const value = Number(raw);
-    if (!Number.isFinite(value)) return DEFAULT_PF_RATE_PCT;
-    return Math.min(9, Math.max(5, value));
+    if (!Number.isFinite(value)) return null;
+    return Math.min(15, Math.max(0, value));
   } catch {
-    return DEFAULT_PF_RATE_PCT;
+    return null;
   }
 }
 
-function readSelectedLtcPct() {
-  if (typeof window === "undefined") return DEFAULT_LTC_PCT;
+/** 사용자가 직접 고른 LTC. 고르지 않았으면 null. */
+function readSelectedLtcPct(): number | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.sessionStorage.getItem("inrealtylab.ltcPct");
+    if (!raw) return null;
     const value = Number(raw);
-    if (!Number.isFinite(value)) return DEFAULT_LTC_PCT;
+    if (!Number.isFinite(value)) return null;
     return Math.round(Math.min(MAX_LTC_PCT, Math.max(MIN_LTC_PCT, value)));
   } catch {
-    return DEFAULT_LTC_PCT;
+    return null;
   }
 }
 
@@ -265,11 +304,11 @@ export function calculateIrr(cashflows: number[]) {
   return (low + high) / 2;
 }
 
-function classifyDscr(dscr: number | null): FinancialCell["btoBotStatus"] {
+function classifyDscr(dscr: number | null, passMin: number = DSCR_PASS_MIN): FinancialCell["btoBotStatus"] {
   if (dscr === null || !Number.isFinite(dscr)) return "REVIEW";
   if (dscr < DSCR_CONDITIONAL_FLOOR) return "FAIL";
-  if (dscr < DSCR_PASS_MIN) return "CONDITIONAL";
-  if (dscr < DSCR_STRONG_MIN) return "PASS";
+  if (dscr < passMin) return "CONDITIONAL";
+  if (dscr < passMin + (DSCR_STRONG_MIN - DSCR_PASS_MIN)) return "PASS";
   return "STRONG";
 }
 
@@ -341,6 +380,8 @@ export function buildIntegratedAnalysis(input: {
   officialLandValue: number | null;
   demand: DemandInputs;
   assumptions: FinancialAssumptions;
+  /** STEP 2에서 고른 사업구조. 없으면 예전처럼 공통 기준으로 계산한다. */
+  structure?: StructurePolicy | null;
 }): IntegratedAnalysis {
   const siteArea = nonNegative(input.siteAreaSqm);
   const farMax = nonNegative(input.farMaxPct);
@@ -414,8 +455,26 @@ export function buildIntegratedAnalysis(input: {
   const legacyOpexPct = nonNegative(input.assumptions.opexPct);
   const referenceRate = nonNegative(input.assumptions.referenceRatePct);
   const pfSpread = nonNegative(input.assumptions.pfSpreadPct);
+  // 사업구조가 정한 DSCR 기준이 있으면 그 값을 쓴다. 없으면 Part 3 공통 기본값 1.20.
+  const structure = input.structure ?? null;
+  const dscrPassMin =
+    structure && typeof structure.dscrMin === "number" && structure.dscrMin > 0
+      ? structure.dscrMin
+      : DSCR_PASS_MIN;
+
+  // 우선순위: 사용자가 화면에서 고른 값 → DB 기준값으로 채워진 assumptions → 최후 기본값
   const selectedPfRate = readSelectedPfRatePct();
-  const selectedLtcPct = readSelectedLtcPct();
+  const derivedRatePct =
+    referenceRate === null || pfSpread === null ? null : referenceRate + pfSpread;
+  const appliedRatePctBase = selectedPfRate ?? derivedRatePct ?? FALLBACK_PF_RATE_PCT;
+  const rateBasis: "USER" | "BENCHMARK" | "FALLBACK" =
+    selectedPfRate !== null ? "USER" : derivedRatePct !== null ? "BENCHMARK" : "FALLBACK";
+
+  const selectedLtc = readSelectedLtcPct();
+  const assumedDebtRatio = nonNegative(input.assumptions.debtRatioPct);
+  const selectedLtcPct = selectedLtc ?? assumedDebtRatio ?? FALLBACK_LTC_PCT;
+  const ltcBasis: "USER" | "BENCHMARK" | "FALLBACK" =
+    selectedLtc !== null ? "USER" : assumedDebtRatio !== null ? "BENCHMARK" : "FALLBACK";
   const investorRequiredReturn = nonNegative(input.assumptions.investorRequiredReturnPct);
   const otherAnnualRevenue = nonNegative(input.assumptions.otherAnnualRevenue) ?? 0;
 
@@ -447,8 +506,8 @@ export function buildIntegratedAnalysis(input: {
     const debtAmount = capacity.totalProjectCost === null
       ? null
       : capacity.totalProjectCost * (selectedLtcPct / 100);
-    const appliedRatePct = selectedPfRate ?? (referenceRate === null || pfSpread === null ? null : referenceRate + pfSpread);
-    const appliedRate = appliedRatePct === null ? null : appliedRatePct / 100;
+    const appliedRatePct = appliedRatePctBase;
+    const appliedRate = appliedRatePct / 100;
     const annualDebtService = debtAmount === null || appliedRate === null
       ? null
       : annuityPayment(debtAmount, appliedRate, term);
@@ -463,7 +522,7 @@ export function buildIntegratedAnalysis(input: {
           ...Array.from({ length: term }, () => annualProjectCashflow),
         ]);
 
-    const btoBotStatus = classifyDscr(dscr);
+    const btoBotStatus = classifyDscr(dscr, dscrPassMin);
     const reitsStatus = classifyIrr(projectIrr);
 
     return {
@@ -494,6 +553,14 @@ export function buildIntegratedAnalysis(input: {
     annualLandFee,
     capacities,
     financialMatrix,
+    financeBasis: {
+      appliedRatePct: appliedRatePctBase,
+      rateBasis,
+      ltcPct: selectedLtcPct,
+      ltcBasis,
+    },
+    structure,
+    dscrPassMin,
   };
 }
 
