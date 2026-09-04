@@ -77,6 +77,101 @@ const emptyDemand: DemandInputs = {
   ) as Partial<Record<CommercialCategoryKey, number | null>>,
 };
 
+type FinanceDefaultSource = {
+  metricCode: string;
+  value: number | null;
+  range: { low: number | null; high: number | null };
+  unit: string | null;
+  publisher: string | null;
+  reportName: string | null;
+  sourcePage: string | null;
+  baseDate: string | null;
+  note: string | null;
+};
+
+type StructurePolicyResponse = {
+  resolved: { code: string; reason: string };
+  policy: {
+    structureCode: string;
+    structureName: string;
+    structureGroup: string;
+    terminalValuePolicy: string;
+    usesExitCapRate: boolean;
+    dscrRequired: boolean;
+    dscrMin: number | null;
+    depreciationBasis: string | null;
+    propertyTaxApplies: boolean | null;
+    ownershipDuringOperation: string | null;
+    notes: string | null;
+  };
+  unmodelled: string[];
+};
+
+type FinanceDefaults = {
+  defaults: {
+    referenceRatePct: number | null;
+    pfSpreadPct: number | null;
+    impliedRatePct: number | null;
+    debtRatioPct: number | null;
+    investorRequiredReturnPct: number | null;
+  };
+  sources: FinanceDefaultSource[];
+  warnings: string[];
+};
+
+type RentFacility = {
+  facilityCode: string;
+  rentPerSqmMonth: number;
+  rentKind: string;
+  geography: string;
+  baseDate: string | null;
+  source: string | null;
+  originTable: string;
+  matchedSubmarket: boolean;
+};
+
+type RetailResolution = {
+  subtype: string;
+  firstFloorRentPerSqmMonth: number;
+  blendedRentPerSqmMonth: number | null;
+  geographyLevel: string;
+  geographyName: string;
+  matchBasis: string;
+  baseDate: string;
+  source: string | null;
+  methodology: string | null;
+  floors: { aboveGround: number; basement: number };
+  floorRatio: {
+    ratioPct: number;
+    geography: string;
+    detail: Array<{ floor: string; ratioPct: number; count: number }>;
+    notes: string[];
+  } | null;
+  tradeAreaOptions: Array<{ code: string | null; name: string; rentPerSqmMonth: number }>;
+  notes: string[];
+};
+
+type RentResolverResponse = {
+  ok: boolean;
+  submarket: string | null;
+  submarketBasis: string;
+  retailZone: string | null;
+  sido: string | null;
+  facilities: RentFacility[];
+  retail: RetailResolution | null;
+  missing: string[];
+  note: string;
+};
+
+// 한국부동산원 상업용부동산 임대동향조사의 표본 구분을 그대로 따른다.
+// 중대형상가 = 3층 이상이거나 연면적 330㎡ 초과, 소규모상가 = 2층 이하이고 330㎡ 이하.
+// 층수 기본값을 이 정의에서 가져와야 임대료와 층수가 같은 표본을 가리킨다.
+const RETAIL_SUBTYPES = [
+  { code: "중대형상가", label: "중대형상가 (3층 이상 또는 330㎡ 초과)", defaultFloors: 3 },
+  { code: "소규모상가", label: "소규모상가 (2층 이하·330㎡ 이하)", defaultFloors: 2 },
+  { code: "집합상가", label: "집합상가 (집합건축물)", defaultFloors: 3 },
+];
+
 const initialAssumptions: FinancialAssumptions = {
   basementRatioPct: null,
   constructionCostPerSqm: null,
@@ -91,70 +186,16 @@ const initialAssumptions: FinancialAssumptions = {
   otherAnnualRevenue: null,
 };
 
-// ── STEP 2에서 고른 값을 읽어온다 (2026-09-03) ──────────────────────────────
-// 예전에는 DEMAND ENGINE 슬롯을 사람이 직접 채워야 매출이 계산됐다. 이제
-// STEP 2의 프로그램 구성이 그 자리를 채우므로, 그 값을 그대로 가져와 쓴다.
-
-type Step2Structure = {
-  landRight: "CONCESSION" | "LEASE_PERMIT" | "TRUST" | "MIXED";
-  concessionType: "BTO" | "BOT";
-  vehicle: "SPC" | "PROJECT_REIT" | "TRUSTEE";
-  publicContributionPct: number;
-};
-
-type Step2Program = {
-  scenarioCode: string;
-  commercial: Record<string, number>;
-  publicFacilities: string[];
-};
-
-const LAND_RIGHT_LABEL: Record<Step2Structure["landRight"], string> = {
-  CONCESSION: "민간투자",
-  LEASE_PERMIT: "대부 · 사용허가",
-  TRUST: "신탁 · 위탁개발",
-  MIXED: "혼합형",
-};
-
-const VEHICLE_LABEL: Record<Step2Structure["vehicle"], string> = {
-  SPC: "프로젝트 SPC",
-  PROJECT_REIT: "개발리츠",
-  TRUSTEE: "신탁사",
-};
-
-const PROGRAM_SPLIT: Record<string, { publicPct: number; commercialPct: number; name: string }> = {
-  PUBLIC_FOCUS: { publicPct: 60, commercialPct: 40, name: "공공성 중심" },
-  BASE: { publicPct: 40, commercialPct: 60, name: "균형형" },
-  COMMERCIAL_FOCUS: { publicPct: 20, commercialPct: 80, name: "수익성 중심" },
-};
-
-// facility_master의 C코드를 이 보고서 엔진의 시설 카테고리로 옮긴다.
-// C07(문화·엔터테인먼트)만 대응 카테고리가 없어 복합용도로 보낸다.
-const C_CODE_TO_CATEGORY: Record<string, CommercialCategoryKey> = {
-  C01: "OFFICE",
-  C02: "RETAIL",
-  C03: "HOSPITALITY",
-  C04: "RESIDENTIAL",
-  C05: "HEALTHCARE",
-  C06: "EDUCATION_RESEARCH",
-  C07: "MIXED_USE",
-  C08: "EDUCATION_RESEARCH",
-  C09: "LOGISTICS_WAREHOUSE",
-  C10: "DATA_CENTER",
-};
-
-function readJson<T>(key: string): T | null {
-  try {
-    const raw = sessionStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    return null;
-  }
-}
-
 function parseNumber(value: string) {
   if (!value.trim()) return null;
   const parsed = Number(value.replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function basisLabel(basis: "USER" | "BENCHMARK" | "FALLBACK") {
+  if (basis === "USER") return "직접 입력";
+  if (basis === "BENCHMARK") return "DB 기준값";
+  return "기본값 · 근거 없음";
 }
 
 function irrText(value: number | null) {
@@ -193,13 +234,20 @@ export default function ReportPage() {
   const [basementAutoApplied, setBasementAutoApplied] = useState(false);
   const [demand, setDemand] = useState<DemandInputs>(emptyDemand);
   const [assumptions, setAssumptions] = useState<FinancialAssumptions>(initialAssumptions);
+  const [financeDefaults, setFinanceDefaults] = useState<FinanceDefaults | null>(null);
+  const [financeDefaultsError, setFinanceDefaultsError] = useState("");
+  const [structurePolicy, setStructurePolicy] = useState<StructurePolicyResponse | null>(null);
+  const [rent, setRent] = useState<RentResolverResponse | null>(null);
+  const [rentError, setRentError] = useState("");
+  const [retailSubtype, setRetailSubtype] = useState("중대형상가");
+  const [retailFloors, setRetailFloors] = useState(3);
+  const [retailBasementFloors, setRetailBasementFloors] = useState(0);
+  const [tradeArea, setTradeArea] = useState("");
   // 2026-08-26 확정: 외부 공유용(고객·투자자·지자체)과 내부 관리자 화면을 정식 로그인 기반으로 분리.
   // 로그인하지 않은 상태(기본값)에서는 입력 도구·단가 카드가 CSS(admin-only)로 숨겨지고,
   // 계산 결과(판정 매트릭스 등)만 보인다.
   const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
-  const [structure, setStructure] = useState<Step2Structure | null>(null);
-  const [program, setProgram] = useState<Step2Program | null>(null);
 
   useEffect(() => {
     let supabase;
@@ -230,11 +278,6 @@ export default function ReportPage() {
       // 로그인 자체가 구성되지 않은 환경이면 조용히 무시한다.
     }
   }
-
-  useEffect(() => {
-    setStructure(readJson<Step2Structure>("inrealtylab.step2Structure"));
-    setProgram(readJson<Step2Program>("inrealtylab.step2Program"));
-  }, []);
 
   useEffect(() => {
     try {
@@ -355,6 +398,109 @@ export default function ReportPage() {
     };
   }, [floorData]);
 
+  // STEP 2에서 고른 사업방식·사업주체를 사업구조 정책으로 바꿔 온다.
+  // 지금까지 STEP 3은 이 선택과 무관하게 BTO/BOT와 REITs 매트릭스를 늘 함께 보여줬다.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let choice: { landRight?: string; concessionType?: string; vehicle?: string } = {};
+      try {
+        const raw = sessionStorage.getItem("inrealtylab.step2Structure");
+        if (raw) choice = JSON.parse(raw);
+      } catch {
+        // 선택값을 못 읽으면 기본 구조로 조회한다.
+      }
+      const query = new URLSearchParams();
+      if (choice.landRight) query.set("landRight", choice.landRight);
+      if (choice.concessionType) query.set("concessionType", choice.concessionType);
+      if (choice.vehicle) query.set("vehicle", choice.vehicle);
+      try {
+        const response = await fetch(`/api/structure-policy?${query.toString()}`);
+        const data = await response.json();
+        if (!response.ok || !data.ok) return;
+        if (!cancelled) setStructurePolicy(data as StructurePolicyResponse);
+      } catch {
+        // 조회 실패 시에는 구조 미적용 상태로 예전 계산을 유지한다.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 금리·LTV를 코드 상수가 아니라 DB(part3_finance_benchmark)에서 받아 채운다.
+  // 사용자가 이미 손으로 넣은 값은 건드리지 않는다.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/underwriting-defaults");
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data?.message ?? "금융 기준값을 불러오지 못했습니다.");
+        if (cancelled) return;
+        setFinanceDefaults({ defaults: data.defaults, sources: data.sources ?? [], warnings: data.warnings ?? [] });
+        setAssumptions((current) => ({
+          ...current,
+          referenceRatePct: current.referenceRatePct ?? data.defaults.referenceRatePct ?? null,
+          pfSpreadPct: current.pfSpreadPct ?? data.defaults.pfSpreadPct ?? null,
+          debtRatioPct: current.debtRatioPct ?? data.defaults.debtRatioPct ?? null,
+          investorRequiredReturnPct:
+            current.investorRequiredReturnPct ?? data.defaults.investorRequiredReturnPct ?? null,
+        }));
+      } catch (error) {
+        if (!cancelled) {
+          setFinanceDefaultsError(error instanceof Error ? error.message : "금융 기준값을 불러오지 못했습니다.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const primaryPnu = snapshot.pnus?.[0] ?? ownership[0]?.pnu ?? "";
+
+  // 시설별 적용 임대료를 DB에서 받아 sessionStorage에 넣는다.
+  // integrated-report.ts의 readFacilityRent가 이 키를 읽는데, 지금까지 아무도 쓰지 않아
+  // 모든 시설의 임대료가 0으로 계산됐다(= 매출 0 → DSCR·IRR 산출 불가).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const query = new URLSearchParams();
+      if (primaryPnu) query.set("pnu", primaryPnu);
+      query.set("retailSubtype", retailSubtype);
+      query.set("retailFloors", String(retailFloors));
+      query.set("retailBasementFloors", String(retailBasementFloors));
+      if (tradeArea) query.set("tradeArea", tradeArea);
+
+      try {
+        const response = await fetch(`/api/rent-resolver?${query.toString()}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data?.message ?? "임대료 자료를 불러오지 못했습니다.");
+        if (cancelled) return;
+
+        try {
+          for (const facility of data.facilities as RentFacility[]) {
+            window.sessionStorage.setItem(
+              `inrealtylab.rent.${facility.facilityCode}`,
+              String(facility.rentPerSqmMonth)
+            );
+          }
+        } catch {
+          // 세션 저장이 막힌 환경에서도 화면의 근거 표시는 그대로 나와야 한다.
+        }
+
+        setRentError("");
+        setRent(data as RentResolverResponse);
+      } catch (error) {
+        if (!cancelled) setRentError(error instanceof Error ? error.message : "임대료 자료를 불러오지 못했습니다.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea]);
+
   useEffect(() => {
     if (basementAutoApplied || assumptions.basementRatioPct !== null || basementReference?.ratioPct === null || basementReference?.ratioPct === undefined) return;
     setAssumptions((current) => current.basementRatioPct === null
@@ -363,42 +509,16 @@ export default function ReportPage() {
     setBasementAutoApplied(true);
   }, [basementAutoApplied, assumptions.basementRatioPct, basementReference]);
 
-  // 지상 연면적 = 대지면적 × 법정 용적률. STEP 2 프로그램 구성이 이 면적을
-  // 공공/수익으로 나누고, 수익 몫을 다시 시설별 비율로 쪼갠다.
-  const aboveGroundGfa = useMemo(() => {
-    const far = snapshot.statutoryFarMaxPct ?? null;
-    if (!siteAreaSqm || !far) return null;
-    return siteAreaSqm * (far / 100);
-  }, [siteAreaSqm, snapshot.statutoryFarMaxPct]);
-
-  const programSplit = program ? PROGRAM_SPLIT[program.scenarioCode] ?? PROGRAM_SPLIT.BASE : null;
-
-  useEffect(() => {
-    if (!program || !programSplit || !aboveGroundGfa) return;
-
-    const commercialGfa = aboveGroundGfa * (programSplit.commercialPct / 100);
-    const publicGfa = aboveGroundGfa * (programSplit.publicPct / 100);
-
-    const byCategory: Partial<Record<CommercialCategoryKey, number | null>> = Object.fromEntries(
-      COMMERCIAL_CATEGORIES.map((item) => [item.key, null])
-    ) as Partial<Record<CommercialCategoryKey, number | null>>;
-
-    for (const [code, pct] of Object.entries(program.commercial)) {
-      const category = C_CODE_TO_CATEGORY[code];
-      if (!category || !pct) continue;
-      byCategory[category] = (byCategory[category] ?? 0) + commercialGfa * (pct / 100);
-    }
-
-    setDemand({ publicRequiredGfa: publicGfa, commercialSupportableGfa: byCategory });
-  }, [program, programSplit, aboveGroundGfa]);
-
   const analysis = useMemo(() => buildIntegratedAnalysis({
     siteAreaSqm,
     farMaxPct: snapshot.statutoryFarMaxPct ?? null,
     officialLandValue,
     demand,
     assumptions,
-  }), [siteAreaSqm, snapshot.statutoryFarMaxPct, officialLandValue, demand, assumptions]);
+    structure: structurePolicy?.policy ?? null,
+    // rent는 buildIntegratedAnalysis가 sessionStorage에서 읽는 값이라 인자로 넘기지 않지만,
+    // 임대료가 갱신되면 매출·DSCR·IRR이 달라지므로 의존성에 넣어 다시 계산하게 한다.
+  }), [siteAreaSqm, snapshot.statutoryFarMaxPct, officialLandValue, demand, assumptions, structurePolicy, rent]);
 
   const ownershipGate = useMemo(() => {
     if (!ownership.length) return "REVIEW";
@@ -444,6 +564,14 @@ export default function ReportPage() {
     setAssumptions((current) => ({ ...current, [key]: numeric }));
   }
 
+  // 상가 유형을 바꾸면 임대료 표본이 바뀌므로 층수 기본값도 그 표본 정의에 맞춘다.
+  function changeRetailSubtype(code: string) {
+    const preset = RETAIL_SUBTYPES.find((item) => item.code === code);
+    setRetailSubtype(code);
+    if (preset) setRetailFloors(preset.defaultFloors);
+    setTradeArea("");
+  }
+
   function setCommercial(key: CommercialCategoryKey, value: string) {
     setDemand((current) => ({
       ...current,
@@ -470,41 +598,6 @@ export default function ReportPage() {
               </button>)}
         </div>
       </div>
-
-      <div className="report-steps no-print">
-        <span className="done">부지</span>
-        <i />
-        <span className="done">사업구조</span>
-        <i />
-        <span className="current">사업성</span>
-      </div>
-
-      {structure && (
-        <div className="report-conditions no-print">
-          <div>
-            <span>사업방식</span>
-            <strong>
-              {LAND_RIGHT_LABEL[structure.landRight]}
-              {structure.landRight === "CONCESSION" ? ` · ${structure.concessionType}` : ""}
-            </strong>
-          </div>
-          <div>
-            <span>사업주체</span>
-            <strong>{VEHICLE_LABEL[structure.vehicle]}</strong>
-          </div>
-          <div>
-            <span>프로그램</span>
-            <strong>
-              {programSplit ? `${programSplit.name} · 공공 ${programSplit.publicPct} : 수익 ${programSplit.commercialPct}` : "미설정"}
-            </strong>
-          </div>
-          <div>
-            <span>공공기여</span>
-            <strong>{structure.publicContributionPct}%</strong>
-          </div>
-          <a className="report-conditions-back" href="/control">사업구조 다시 고르기</a>
-        </div>
-      )}
 
       <section className="report-page">
         <div className="report-kicker">01 · SITE / LEGAL STATUS</div>
@@ -549,6 +642,41 @@ export default function ReportPage() {
             <Field label="출자자 요구수익률 %" value={assumptions.investorRequiredReturnPct} onChange={(v) => setAssumption("investorRequiredReturnPct", v)} />
           </div>
           <div className="report-field" style={{ marginTop: 12 }}><label>가동률 {assumptions.occupancyPct}% · 80~95%, 1% 단위</label><input type="range" min={80} max={95} step={1} value={assumptions.occupancyPct} onChange={(e) => setAssumption("occupancyPct", Number(e.target.value))} /></div>
+
+          {financeDefaultsError && <div className="report-warning">{financeDefaultsError}</div>}
+          {financeDefaults && (
+            <div className="report-note" style={{ marginTop: 12 }}>
+              <strong>금융 가정 출처</strong>
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {financeDefaults.sources.map((source) => (
+                  <li key={source.metricCode}>
+                    {source.metricCode} {source.value ?? "-"}
+                    {source.unit === "pct" || source.unit === "%" ? "%" : ""}
+                    {source.range.low !== null && source.range.high !== null
+                      ? ` (범위 ${source.range.low}~${source.range.high})`
+                      : ""}
+                    {" — "}
+                    {source.publisher ?? "출처 미상"}
+                    {source.reportName ? `, ${source.reportName}` : ""}
+                    {source.baseDate ? ` (${source.baseDate})` : ""}
+                    {source.note ? ` · ${source.note}` : ""}
+                  </li>
+                ))}
+              </ul>
+              {financeDefaults.warnings.map((warning) => (
+                <p key={warning} style={{ margin: "8px 0 0" }}>{warning}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="report-note" style={{ marginTop: 10 }}>
+            <strong>판정에 실제로 쓰인 값</strong> — 대출금리 {analysis.financeBasis.appliedRatePct.toFixed(2)}%
+            ({basisLabel(analysis.financeBasis.rateBasis)}) · 차입비율 {analysis.financeBasis.ltcPct}%
+            ({basisLabel(analysis.financeBasis.ltcBasis)})
+            {(analysis.financeBasis.rateBasis === "FALLBACK" || analysis.financeBasis.ltcBasis === "FALLBACK") && (
+              <> — 출처가 없는 최후 기본값이 섞여 있습니다. 대외 자료로 쓰기 전에 조달 조건을 확정해 주세요.</>
+            )}
+          </div>
         </div>
         <div className="report-page-number">1 / 3</div>
       </section>
@@ -563,6 +691,73 @@ export default function ReportPage() {
         <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
           <div className="report-demand-grid"><Field label="PUBLIC Required GFA ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
         </div>
+        <div className="report-section"><div className="report-section-head"><div><span>RENT</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{rent?.retail?.baseDate ?? ""}</span></div>
+          <div className="report-form-grid no-print admin-only">
+            <div className="report-field">
+              <label>상가 유형</label>
+              <select value={retailSubtype} onChange={(e) => changeRetailSubtype(e.target.value)}>
+                {RETAIL_SUBTYPES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}
+              </select>
+            </div>
+            <div className="report-field">
+              <label>상권</label>
+              <select value={tradeArea} onChange={(e) => setTradeArea(e.target.value)}>
+                <option value="">권역 평균 (상권 미지정)</option>
+                {(rent?.retail?.tradeAreaOptions ?? []).map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.name} · {item.rentPerSqmMonth.toLocaleString()}원
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Field label="상가 지상 층수" value={retailFloors} onChange={(v) => setRetailFloors(Math.max(1, parseNumber(v) ?? 1))} />
+            <Field label="상가 지하 층수" value={retailBasementFloors} onChange={(v) => setRetailBasementFloors(Math.max(0, parseNumber(v) ?? 0))} />
+          </div>
+
+          {rentError && <div className="report-warning">{rentError}</div>}
+
+          {rent && (
+            <>
+              <table className="report-table"><thead><tr><th>시설</th><th>적용 임대료 원/㎡·월</th><th>지역</th><th>출처</th></tr></thead><tbody>
+                {rent.facilities.map((facility) => (
+                  <tr key={facility.facilityCode}>
+                    <td className="left">{facility.facilityCode}</td>
+                    <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
+                    <td>{facility.geography}</td>
+                    <td className="left">{facility.source ?? facility.originTable}{facility.baseDate ? ` (${facility.baseDate})` : ""}</td>
+                  </tr>
+                ))}
+              </tbody></table>
+
+              {rent.retail && (
+                <div className="report-note" style={{ marginTop: 10 }}>
+                  <strong>리테일 환산 근거</strong> — {rent.retail.geographyName} {rent.retail.subtype} 1층 기준{" "}
+                  {rent.retail.firstFloorRentPerSqmMonth.toLocaleString()}원/㎡·월
+                  {rent.retail.floorRatio
+                    ? ` × 층별효용비율 ${rent.retail.floorRatio.ratioPct}% (지상 ${rent.retail.floors.aboveGround}층·지하 ${rent.retail.floors.basement}층 기준) = ${rent.retail.blendedRentPerSqmMonth?.toLocaleString()}원/㎡·월`
+                    : ""}
+                  <div className="report-source" style={{ marginTop: 6 }}>
+                    매칭 근거 {rent.retail.matchBasis}
+                    {rent.retail.floorRatio ? ` · 효용비율 ${rent.retail.floorRatio.geography} 기준` : ""}
+                    {rent.retail.source ? ` · ${rent.retail.source}` : ""}
+                  </div>
+                  {[...rent.retail.notes, ...(rent.retail.floorRatio?.notes ?? [])].map((note) => (
+                    <p key={note} style={{ margin: "6px 0 0" }}>{note}</p>
+                  ))}
+                </div>
+              )}
+
+              {rent.missing.length > 0 && (
+                <div className="report-warning" style={{ marginTop: 10 }}>
+                  임대료 자료가 없는 시설: {rent.missing.join(", ")} — 이 시설들은 매출 0으로 계산됩니다.
+                </div>
+              )}
+
+              <div className="report-source" style={{ marginTop: 8 }}>{rent.note}</div>
+            </>
+          )}
+        </div>
+
         <div className="report-section"><div className="report-section-head"><div><span>DEMAND FIT</span><br /><strong>개발가능 면적 vs 수요시설 면적</strong></div></div>
           <table className="report-table"><thead><tr><th>개발안</th><th>지상 GFA</th><th>수요 GFA</th><th>차이</th><th>판정</th></tr></thead><tbody>{analysis.capacities.map((c) => <tr key={c.key}><td>{c.label}</td><td>{formatGfa(c.aboveGroundGfa || null)}</td><td>{formatGfa(c.fullDemandGfa)}</td><td>{c.demandGapGfa === null ? "-" : `${c.demandGapGfa >= 0 ? "+" : ""}${formatGfa(c.demandGapGfa)}`}</td><td><span className={`report-status ${statusTone(c.demandFit)}`}>{c.demandFit}</span></td></tr>)}</tbody></table>
         </div>
@@ -581,8 +776,41 @@ export default function ReportPage() {
           <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="CONDITIONAL" value="1.00 ≤ Min DSCR < 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
           <div className="report-card"><h3>REITs</h3><Metric label="PASS" value="Project IRR ≥ 6.5%" /><Metric label="CONDITIONAL" value="4.50% ≤ IRR < 6.5%" /><Metric label="출자자 요구" value={assumptions.investorRequiredReturnPct ? `${assumptions.investorRequiredReturnPct}%` : "별도 입력"} /></div>
         </div>
-        <div className="report-section"><div className="report-section-head"><div><span>BTO / BOT</span><br /><strong>Minimum DSCR Matrix</strong></div></div><Matrix mode="BTO" analysis={analysis} /></div>
-        <div className="report-section"><div className="report-section-head"><div><span>REITs</span><br /><strong>Project IRR Matrix</strong></div></div><Matrix mode="REITS" analysis={analysis} /></div>
+        {structurePolicy && (
+          <div className="report-section">
+            <div className="report-section-head">
+              <div><span>STRUCTURE</span><br /><strong>선택된 사업구조</strong></div>
+              <span className="report-status conditional">{structurePolicy.policy.structureName}</span>
+            </div>
+            <div className="report-grid three">
+              <div className="report-card">
+                <h3>판정 기준</h3>
+                <Metric label="DSCR 기준" value={analysis.dscrPassMin.toFixed(2)} />
+                <Metric label="잔존가 처리" value={structurePolicy.policy.terminalValuePolicy === "EXIT_VALUE" ? "Exit Value" : "0 (귀속·반환)"} />
+              </div>
+              <div className="report-card">
+                <h3>세무 처리</h3>
+                <Metric label="시설 소유" value={structurePolicy.policy.ownershipDuringOperation ?? "-"} />
+                <Metric label="시설분 재산세" value={structurePolicy.policy.propertyTaxApplies ? "부담" : "없음"} />
+              </div>
+              <div className="report-card">
+                <h3>선택 경로</h3>
+                <p>{structurePolicy.resolved.reason}</p>
+              </div>
+            </div>
+            {structurePolicy.unmodelled.length > 0 && (
+              <div className="report-warning">
+                <strong>아직 현금흐름에 반영되지 않은 항목</strong>
+                <ul className="unresolved-list" style={{ marginTop: 8 }}>
+                  {structurePolicy.unmodelled.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "참고" : "적용"}</span><br /><strong>Minimum DSCR Matrix</strong></div><span className="report-source">기준 DSCR {analysis.dscrPassMin.toFixed(2)}</span></div><Matrix mode="BTO" analysis={analysis} /></div>
+        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "적용" : "참고"}</span><br /><strong>Project IRR Matrix</strong></div></div><Matrix mode="REITS" analysis={analysis} /></div>
         <div className="report-section report-verdict"><span className={`report-status ${statusTone(finalDecision.status)}`}>{finalDecision.status}</span><strong>{finalDecision.title}</strong><p>{finalDecision.text}</p>{recommendation && <p><b>우선 검토:</b> {recommendation.scenarioLabel} / {recommendation.term}년 · BTO/BOT {recommendation.btoBotStatus} · REITs {recommendation.reitsStatus}</p>}</div>
         <div className="report-note">실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing, 실제 임대료·OPEX·금리·Lifecycle CAPEX를 반영해 확정합니다. REITs의 6.5%는 INRealtyLab 내부 Project IRR 판정기준(공통 목표수익률)이며, DSCR·IRR 중 하나라도 CONDITIONAL/FAIL이면 종합판정도 그에 따라 조건부 가능/불가로 표시됩니다.</div>
         <div className="report-page-number">3 / 3</div>
