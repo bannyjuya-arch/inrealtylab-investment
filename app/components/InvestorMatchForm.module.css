@@ -1,0 +1,14 @@
+﻿.section { margin-bottom: 20px; }
+.section h3 { font-size: 14px; color: #26292B; margin-bottom: 10px; font-weight: 600; }
+.chipGrid { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 6px 14px; border-radius: 999px; border: 1px solid #A8CBBB; background: #fff; font-size: 13px; color: #26292B; cursor: pointer; }
+.chipSelected { background: #14453A; color: #fff; border-color: #14453A; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.grid3 { grid-template-columns: repeat(3, 1fr); }
+.card { padding: 14px; border-radius: 10px; border: 1px solid #A8CBBB; background: #fff; text-align: left; font-size: 14px; color: #26292B; cursor: pointer; }
+.cardSelected { background: #14453A; color: #fff; border-color: #14453A; }
+.numericInput { padding: 10px 12px; border: 1px solid #A8CBBB; border-radius: 8px; font-size: 14px; width: 160px; }
+.sliderRow { display: flex; align-items: center; gap: 12px; }
+.sliderValue { font-weight: 600; color: #14453A; }
+.error { color: #E0512A; font-size: 13px; }
+.submitBtn { background: #14453A; color: #fff; border: none; border-radius: 8px; padding: 12px 24px; font-size: 15px; cursor: pointer; margin-top: 8px; }
