@@ -54,11 +54,20 @@ type AllowedUseFacility = {
   confidence: number;
   activityCode: string | null;
   activityName: string | null;
+  maxGfaSqm?: number | null;
 };
 
 type AllowedUseData = {
   facilities: AllowedUseFacility[];
-  diagnostics: { activityCatalogCount: number; matchedFacilityCount: number };
+  caveats?: string[];
+  zone?: { ucode: string; name: string; listType: "POSITIVE" | "NEGATIVE" };
+  diagnostics: {
+    activityCatalogCount: number;
+    matchedFacilityCount: number;
+    nationalRuleCount?: number;
+    localRuleCount?: number;
+    hasLocalLayer?: boolean;
+  };
   source: { code: string; name: string; endpoints: string[]; baseDate: string; queriedAt: string; note: string };
 };
 
@@ -175,17 +184,25 @@ export default function SiteProgram() {
           const data = await response.json();
           if (!response.ok || !data.ok) throw new Error(data?.message ?? "건축 가능시설 조회에 실패했습니다.");
           if (!cancelled) {
-            setAllowedUse({ facilities: data.facilities ?? [], diagnostics: data.diagnostics, source: data.source });
+            setAllowedUse({
+              facilities: data.facilities ?? [],
+              caveats: data.caveats ?? [],
+              zone: data.zone,
+              diagnostics: data.diagnostics,
+              source: data.source,
+            });
           }
           // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설을 걸러낼 때 쓴다.
           try {
             const allowedKeys = (data.facilities ?? [])
-              .filter((facility: AllowedUseFacility) => facility.decision === "ALLOWED" || facility.decision === "CONDITIONAL")
+              .filter(
+                (facility: AllowedUseFacility) =>
+                  facility.decision === "ALLOWED" ||
+                  facility.decision === "CONDITIONAL" ||
+                  facility.decision === "REVIEW"
+              )
               .map((facility: AllowedUseFacility) => facility.key);
             sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
-            // 프로그램 구성은 이 컴포넌트와 같은 화면에 동시에 뜬다. 조회가 끝나는
-            // 시점이 나중이라 스토리지만 써두면 못 읽고 지나간다 — 끝났다고 알린다.
-            window.dispatchEvent(new CustomEvent("inrealtylab:allowedUse", { detail: allowedKeys }));
           } catch {
             // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
           }
@@ -305,7 +322,7 @@ export default function SiteProgram() {
         <>
           <div className="metric-grid">
             <div><span>기준 용도지역</span><strong>{regulation?.primaryZone ?? "추가확인"}</strong></div>
-            <div><span>행위코드 매칭</span><strong>{allowedUse.diagnostics.matchedFacilityCount}/{allowedUse.facilities.length}</strong></div>
+            <div><span>건축 가능 용도</span><strong>{allowedUse.diagnostics.matchedFacilityCount}/{allowedUse.facilities.length}</strong></div>
             <div><span>기준일</span><strong>{allowedUse.source.baseDate}</strong></div>
           </div>
 
@@ -314,9 +331,20 @@ export default function SiteProgram() {
           <AllowedUseGroup title="기타 수익시설" facilities={allowedUse.facilities.filter((facility) => !["OFFICE", "RETAIL", "PUBLIC"].includes(facility.group))} />
           <AllowedUseGroup title="공공·필수시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "PUBLIC")} />
 
+          {allowedUse.caveats?.length ? (
+            <div className="control-warning">
+              <strong>항 단서</strong>
+              <ul className="unresolved-list" style={{ marginTop: 8 }}>
+                {allowedUse.caveats.map((caveat) => (
+                  <li key={caveat}>{caveat}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="source-note">
             <strong>{allowedUse.source.name}</strong>
-            <span>기준일 {allowedUse.source.baseDate} · {allowedUse.source.endpoints.join(" + ")}</span>
+            <span>기준일 {allowedUse.source.baseDate} · 조문 {allowedUse.diagnostics.activityCatalogCount}행</span>
             <p>{allowedUse.source.note}</p>
           </div>
 
@@ -393,9 +421,18 @@ export default function SiteProgram() {
           <div className="capacity-status-list">
             <CapacityStatus label="대지면적 / PNU" status="반영" tone="ok" detail="VWorld 지적 필지" />
             <CapacityStatus label="용도지역" status="반영" tone="ok" detail={regulation.primaryZone ?? "세부지역 확인 필요"} />
-            <CapacityStatus label="건축 가능시설" status={allowedUse ? "조회" : "미조회"} tone={allowedUse ? "ok" : "pending"} detail={allowedUse ? "국토교통부 토지이용규제정보서비스" : "조회 실패"} />
+            <CapacityStatus label="건축 가능시설" status={allowedUse ? "판정" : "미조회"} tone={allowedUse ? "ok" : "pending"} detail={allowedUse ? allowedUse.source.name : "판정 실패"} />
             <CapacityStatus label="국가 건폐율·용적률" status="반영" tone="ok" detail={regulation.statutoryLimit.legalBasis} />
-            <CapacityStatus label="지자체 조례" status="미반영" tone="pending" detail="조례 Rule DB 연결 예정" />
+            <CapacityStatus
+              label="지자체 조례"
+              status={allowedUse?.diagnostics.hasLocalLayer ? "반영" : "미반영"}
+              tone={allowedUse?.diagnostics.hasLocalLayer ? "ok" : "pending"}
+              detail={
+                allowedUse?.diagnostics.hasLocalLayer
+                  ? `조례 별표 ${allowedUse.diagnostics.localRuleCount ?? 0}개 항목 반영`
+                  : "해당 지자체 조례 별표 미확보 — 조례 위임 항목은 추가확인"
+              }
+            />
             <CapacityStatus
               label="지구단위계획 세부지침"
               status={regulation.districtPlans.length ? "검토 필요" : "중첩 없음"}
@@ -441,7 +478,12 @@ function AllowedUseGroup({ title, facilities }: { title: string; facilities: All
               label={facility.label}
               status={decisionLabel(facility.decision)}
               tone={decisionTone(facility.decision)}
-              detail={`${facility.activityName ?? "행위코드 추가확인"} · 신뢰도 ${Math.round(facility.confidence * 100)}% · ${facility.reason}`}
+              detail={[
+                facility.maxGfaSqm ? `상한 ${facility.maxGfaSqm.toLocaleString("ko-KR")}㎡` : null,
+                facility.reason,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             />
           ))}
         </div>
