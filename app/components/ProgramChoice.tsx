@@ -467,7 +467,7 @@ export default function ProgramChoice() {
           return (
             <div className={`program-row${isTouched ? " touched" : ""}`} key={code}>
               <div className="program-row-head">
-                <span className="program-code">{code}</span>
+                <span className="program-code admin-only">{code}</span>
                 <strong>{facility.label}</strong>
                 <span className="program-model">{facility.businessModel}</span>
                 {isTouched ? <em className="choice-tag dark">직접 수정함</em> : <em className="choice-tag">추천</em>}
@@ -521,7 +521,7 @@ export default function ProgramChoice() {
           <div className="program-chips">
             {addable.map((facility) => (
               <button type="button" key={facility.code} className="program-chip" onClick={() => addFacility(facility.code)}>
-                <span className="program-code">{facility.code}</span>{facility.label}
+                <span className="program-code admin-only">{facility.code}</span>{facility.label}
               </button>
             ))}
           </div>
@@ -534,7 +534,7 @@ export default function ProgramChoice() {
           <div className="program-chips">
             {blocked.map((facility) => (
               <span key={facility.code} className="program-chip blocked">
-                <span className="program-code">{facility.code}</span>{facility.label}
+                <span className="program-code admin-only">{facility.code}</span>{facility.label}
               </span>
             ))}
           </div>
@@ -556,7 +556,7 @@ export default function ProgramChoice() {
               className={`program-chip${on ? " on" : ""}`}
               onClick={() => togglePublic(facility.code)}
             >
-              <span className={`program-code${facility.revenue ? " revenue" : ""}`}>{facility.revenue ? "P-R" : "P-NR"}</span>
+              <span className={`program-code${facility.revenue ? " revenue" : ""}`}>{facility.revenue ? "수익" : "비수익"}</span>
               {facility.label}
             </button>
           );
