@@ -180,6 +180,14 @@ const HOUSING_SIDO_CODE: Record<string, string> = {
   "48": "48000", "50": "50000", "51": "51000", "52": "52000",
 };
 
+type DerivationRule = {
+  facility_code: string;
+  base_facility_code: string;
+  ratio_pct: number;
+  basis: string;
+  decided_by: string | null;
+};
+
 type HousingRentRow = {
   geography_level: string;
   geography_name: string;
@@ -585,6 +593,62 @@ export async function GET(request: NextRequest) {
       else facilities.push(entry);
     }
 
+    // 관측치가 없는 시설을 다른 시설에서 파생시킨다(part3_rent_derivation_rule).
+    // 시장 자료가 아니라 내부 적용 기준이므로 rentKind를 DERIVED로 표시해 구분한다.
+    const derivations: Array<{
+      facilityCode: string;
+      baseFacilityCode: string;
+      ratioPct: number;
+      rentPerSqmMonth: number;
+      basis: string;
+      decidedBy: string | null;
+    }> = [];
+
+    try {
+      const ruleQuery = new URLSearchParams({
+        select: "facility_code,base_facility_code,ratio_pct,basis,decided_by",
+        is_active: "eq.true",
+      });
+      const ruleResponse = await fetch(`${url}/rest/v1/part3_rent_derivation_rule?${ruleQuery.toString()}`, {
+        cache: "no-store",
+        headers: supabasePublicHeaders({ Accept: "application/json" }),
+      });
+      if (ruleResponse.ok) {
+        const rules = (await ruleResponse.json()) as DerivationRule[];
+        for (const rule of rules) {
+          if (facilities.some((item) => item.facilityCode === rule.facility_code)) continue;
+          const base = facilities.find((item) => item.facilityCode === rule.base_facility_code);
+          if (!base) continue;
+          const ratio = Number(rule.ratio_pct);
+          if (!Number.isFinite(ratio) || ratio <= 0) continue;
+
+          const rent = Math.round(base.rentPerSqmMonth * ratio / 100);
+          facilities.push({
+            facilityCode: rule.facility_code,
+            rentPerSqmMonth: rent,
+            rentKind: "DERIVED",
+            geography: base.geography,
+            sampleCount: 0,
+            baseDate: base.baseDate,
+            source: `${rule.base_facility_code}의 ${ratio}% (인리얼티 내부 기준)`,
+            originTable: "part3_rent_derivation_rule",
+            matchedSubmarket: base.matchedSubmarket,
+            alternatives: [],
+          });
+          derivations.push({
+            facilityCode: rule.facility_code,
+            baseFacilityCode: rule.base_facility_code,
+            ratioPct: ratio,
+            rentPerSqmMonth: rent,
+            basis: rule.basis,
+            decidedBy: rule.decided_by,
+          });
+        }
+      }
+    } catch {
+      // 파생 규칙을 못 읽어도 관측치 기반 임대료는 그대로 내보낸다.
+    }
+
     // 시설은 있는데 임대료 자료가 없는 것들. 매출이 0으로 잡히는 원인이라 명시한다.
     const covered = new Set(facilities.map((item) => item.facilityCode));
     const missing = [
@@ -607,6 +671,7 @@ export async function GET(request: NextRequest) {
       facilities,
       retail,
       housing,
+      derivations,
       missing,
       note:
         "원/평·월 자료는 3.305785로 나눠 원/㎡·월로 통일했습니다. 실질임대료(EFFECTIVE)가 있으면 호가(ASKING)보다 먼저 씁니다. 리테일은 한국부동산원 1층 기준 임대료에 층별 효용비율을 적용한 건물 평균값이고, 주거는 ㎡당 전세가격에 전월세전환율을 적용한 전용면적 기준 값입니다.",

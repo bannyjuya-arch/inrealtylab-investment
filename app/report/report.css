@@ -149,8 +149,16 @@
   .report-page-number { right: 14mm; bottom: 8mm; }
   .report-form-grid, .report-demand-grid { gap: 6px; }
   .report-field input, .report-field select { padding: 6px 7px; font-size: 10.5px; }
-  .report-verdict { padding: 16px 18px; }
-  .report-verdict strong { font-size: 24px; }
+  /* 인쇄에서는 지도 자리를 줄여 1면에 표가 하나 더 들어가게 합니다. */
+  .report-map-placeholder { min-height: 150px; }
+  .report-grid { gap: 12px; }
+  .report-verdict { padding: 13px 16px; }
+  .report-verdict strong { font-size: 21px; margin-bottom: 6px; }
+  .report-verdict p { margin: 3px 0; line-height: 1.5; }
+  /* 매트릭스 두 개가 3면 세로를 가장 많이 먹습니다. 셀 여백만 줄여도 각주 두 줄이 들어옵니다. */
+  .matrix-value { margin-bottom: 2px; }
+  .report-table td:has(.report-status) { padding: 4px 6px; }
+  .report-section:has(.report-table) { margin-top: 13px; }
   /* 배경 인쇄가 꺼져 있어도 판정이 읽히도록 */
   .report-verdict, .report-status { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

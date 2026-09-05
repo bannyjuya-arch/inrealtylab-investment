@@ -151,6 +151,25 @@ type RetailResolution = {
   notes: string[];
 };
 
+type HousingResolution = {
+  housingType: string;
+  statKind: string;
+  rentPerSqmMonthExclusive: number;
+  rentKrwUnitMonth: number;
+  geographyName: string;
+  geographyCode: string;
+  geographyLevel: string;
+  matchBasis: string;
+  conversionRatePct: number;
+  rateSource: string;
+  jeonsePerSqmKrw: number;
+  baseMonth: string;
+  report: string | null;
+  sourcePage: string | null;
+  areaBasis: string;
+  notes: string[];
+};
+
 type RentResolverResponse = {
   ok: boolean;
   submarket: string | null;
@@ -159,9 +178,12 @@ type RentResolverResponse = {
   sido: string | null;
   facilities: RentFacility[];
   retail: RetailResolution | null;
+  housing: HousingResolution | null;
   missing: string[];
   note: string;
 };
+
+const HOUSING_TYPES = ["아파트", "종합", "연립다세대", "단독주택"];
 
 // 한국부동산원 상업용부동산 임대동향조사의 표본 구분을 그대로 따른다.
 // 중대형상가 = 3층 이상이거나 연면적 330㎡ 초과, 소규모상가 = 2층 이하이고 330㎡ 이하.
@@ -243,6 +265,8 @@ export default function ReportPage() {
   const [retailFloors, setRetailFloors] = useState(3);
   const [retailBasementFloors, setRetailBasementFloors] = useState(0);
   const [tradeArea, setTradeArea] = useState("");
+  const [housingType, setHousingType] = useState("아파트");
+  const [housingStat, setHousingStat] = useState<"MEAN" | "MEDIAN">("MEAN");
   // 2026-08-26 확정: 외부 공유용(고객·투자자·지자체)과 내부 관리자 화면을 정식 로그인 기반으로 분리.
   // 로그인하지 않은 상태(기본값)에서는 입력 도구·단가 카드가 CSS(admin-only)로 숨겨지고,
   // 계산 결과(판정 매트릭스 등)만 보인다.
@@ -472,6 +496,8 @@ export default function ReportPage() {
       query.set("retailFloors", String(retailFloors));
       query.set("retailBasementFloors", String(retailBasementFloors));
       if (tradeArea) query.set("tradeArea", tradeArea);
+      query.set("housingType", housingType);
+      query.set("housingStat", housingStat);
 
       try {
         const response = await fetch(`/api/rent-resolver?${query.toString()}`, { cache: "no-store" });
@@ -499,7 +525,7 @@ export default function ReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea]);
+  }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea, housingType, housingStat]);
 
   useEffect(() => {
     if (basementAutoApplied || assumptions.basementRatioPct !== null || basementReference?.ratioPct === null || basementReference?.ratioPct === undefined) return;
@@ -600,9 +626,9 @@ export default function ReportPage() {
       </div>
 
       <section className="report-page">
-        <div className="report-kicker">01 · SITE / LEGAL STATUS</div>
+        <div className="report-kicker">01 · SITE — 대지 조건</div>
         <h1 className="report-title">{address} 사업추진 약식검토</h1>
-        <p className="report-subtitle">지도·대지현황·법적 개발가능 규모</p>
+        <p className="report-subtitle">위치·대지현황 · 소유와 협의대상 · 법적 개발가능 규모</p>
         <div className="report-grid">
           <div className="report-map-placeholder"><div><strong>선택 필지 지도영역</strong><span>Part 1 선택필지 {parcelCount || "-"}개 · PNU 기반 연계</span></div></div>
           <div className="report-card"><h3>대지 개요</h3>
@@ -617,11 +643,16 @@ export default function ReportPage() {
             </div>
           </div>
         </div>
-        <div className="report-section"><div className="report-section-head"><div><span>PART 1</span><br /><strong>개발가능 규모</strong></div></div>
+        <div className="report-grid">
+          <div className="report-card"><h3>소유권 Gate</h3><Metric label="판정" value={ownershipGate} />{records.map((row, i) => <div className="report-owner-row" key={`${row.pnu}-${i}`}><strong>{row.ownerTypeLabel} · {row.ownerClass}</strong><span>{row.legalDong} {row.jibun}</span></div>)}</div>
+          <div className="report-card"><h3>협의대상자</h3><p>1차 · 토지 소유기관</p><p>2차 · 재산관리관·관리권자·운영주체</p><p>3차 · 관리·처분·개발 의사결정권자</p><div className="report-warning">공개 소유정보로 실제 기관명·재산관리관이 확정되지 않으면 “확인 필요”로 유지합니다.</div></div>
+        </div>
+        <div className="report-section"><div className="report-section-head"><div><span>LEGAL CAPACITY</span><br /><strong>법적 개발가능 규모와 공사비</strong></div></div>
           <table className="report-table"><thead><tr><th>구분</th>{DEVELOPMENT_SCENARIOS.map((s) => <th key={s.key}>{s.label}</th>)}</tr></thead><tbody>
             <tr><td className="left">지상 개발가능 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.aboveGroundGfa || null)}</td>)}</tr>
             <tr><td className="left">지하 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.undergroundGfa)}</td>)}</tr>
             <tr><td className="left">총 공사 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.totalConstructionGfa)}</td>)}</tr>
+            <tr><td className="left">Construction CAPEX</td>{analysis.capacities.map((c) => <td key={c.key}>{formatWon(c.constructionCapex)}</td>)}</tr>
           </tbody></table>
           <div className="report-note" style={{ marginTop: 10 }}>
             {basementReference?.ratioPct !== null && basementReference?.ratioPct !== undefined
@@ -629,6 +660,127 @@ export default function ReportPage() {
               : "건축HUB에서 유효한 지상·지하 층별 면적을 찾지 못해 지하 비율은 자동 추정하지 않았습니다."}
           </div>
         </div>
+        <div className="report-page-number">1 / 3</div>
+      </section>
+
+      <section className="report-page">
+        <div className="report-kicker">02 · PROGRAM — 시설 구성</div>
+        <h2 className="report-title">수요시설과 적용 임대료</h2>
+        <p className="report-subtitle">시설별 수요면적 · 위치에 맞춘 임대료 근거 · 개발규모별 공사비</p>
+        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
+          <div className="report-demand-grid"><Field label="PUBLIC Required GFA ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
+        </div>
+        <div className="report-section"><div className="report-section-head"><div><span>RENT</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{rent?.retail?.baseDate ?? ""}</span></div>
+          <div className="report-form-grid no-print admin-only">
+            <div className="report-field">
+              <label>상가 유형</label>
+              <select value={retailSubtype} onChange={(e) => changeRetailSubtype(e.target.value)}>
+                {RETAIL_SUBTYPES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}
+              </select>
+            </div>
+            <div className="report-field">
+              <label>상권</label>
+              <select value={tradeArea} onChange={(e) => setTradeArea(e.target.value)}>
+                <option value="">권역 평균 (상권 미지정)</option>
+                {(rent?.retail?.tradeAreaOptions ?? []).map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {item.name} · {item.rentPerSqmMonth.toLocaleString()}원
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Field label="상가 지상 층수" value={retailFloors} onChange={(v) => setRetailFloors(Math.max(1, parseNumber(v) ?? 1))} />
+            <Field label="상가 지하 층수" value={retailBasementFloors} onChange={(v) => setRetailBasementFloors(Math.max(0, parseNumber(v) ?? 0))} />
+            <div className="report-field">
+              <label>주거 유형</label>
+              <select value={housingType} onChange={(e) => setHousingType(e.target.value)}>
+                {HOUSING_TYPES.map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </div>
+            <div className="report-field">
+              <label>주거 통계 기준</label>
+              <select value={housingStat} onChange={(e) => setHousingStat(e.target.value === "MEDIAN" ? "MEDIAN" : "MEAN")}>
+                <option value="MEAN">평균</option>
+                <option value="MEDIAN">중위</option>
+              </select>
+            </div>
+          </div>
+
+          {rentError && <div className="report-warning">{rentError}</div>}
+
+          {rent && (
+            <>
+              <table className="report-table"><thead><tr><th>시설</th><th>적용 임대료 원/㎡·월</th><th>지역</th><th>출처</th></tr></thead><tbody>
+                {rent.facilities.map((facility) => (
+                  <tr key={facility.facilityCode}>
+                    <td className="left">{facility.facilityCode}</td>
+                    <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
+                    <td>{facility.geography}</td>
+                    <td className="left">{facility.source ?? facility.originTable}{facility.baseDate ? ` (${facility.baseDate})` : ""}</td>
+                  </tr>
+                ))}
+              </tbody></table>
+
+              {rent.retail && (
+                <div className="report-note" style={{ marginTop: 10 }}>
+                  <strong>리테일 환산 근거</strong> — {rent.retail.geographyName} {rent.retail.subtype} 1층 기준{" "}
+                  {rent.retail.firstFloorRentPerSqmMonth.toLocaleString()}원/㎡·월
+                  {rent.retail.floorRatio
+                    ? ` × 층별효용비율 ${rent.retail.floorRatio.ratioPct}% (지상 ${rent.retail.floors.aboveGround}층·지하 ${rent.retail.floors.basement}층 기준) = ${rent.retail.blendedRentPerSqmMonth?.toLocaleString()}원/㎡·월`
+                    : ""}
+                  <div className="report-source" style={{ marginTop: 6 }}>
+                    매칭 근거 {rent.retail.matchBasis}
+                    {rent.retail.floorRatio ? ` · 효용비율 ${rent.retail.floorRatio.geography} 기준` : ""}
+                    {rent.retail.source ? ` · ${rent.retail.source}` : ""}
+                  </div>
+                  {[...rent.retail.notes, ...(rent.retail.floorRatio?.notes ?? [])].map((note) => (
+                    <p key={note} style={{ margin: "6px 0 0" }}>{note}</p>
+                  ))}
+                </div>
+              )}
+
+              {rent.housing && (
+                <div className="report-note" style={{ marginTop: 10 }}>
+                  <strong>주거 환산 근거</strong> — {rent.housing.geographyName} {rent.housing.housingType}{" "}
+                  {rent.housing.statKind === "MEAN" ? "평균" : "중위"} ㎡당 전세가격{" "}
+                  {rent.housing.jeonsePerSqmKrw.toLocaleString()}원 × 전월세전환율 {rent.housing.conversionRatePct}% ÷ 12 ={" "}
+                  <strong>{rent.housing.rentPerSqmMonthExclusive.toLocaleString()}원/㎡·월</strong> ({rent.housing.areaBasis} 기준)
+                  <div className="report-source" style={{ marginTop: 6 }}>
+                    매칭 근거 {rent.housing.matchBasis} · 전환율 출처 {rent.housing.rateSource}
+                    {rent.housing.report ? ` · ${rent.housing.report}` : ""}
+                    {rent.housing.sourcePage ? ` ${rent.housing.sourcePage}` : ""} ({rent.housing.baseMonth})
+                    {" · 호당 환산 "}{Math.round(rent.housing.rentKrwUnitMonth / 10000).toLocaleString()}만원/월
+                  </div>
+                  <p style={{ margin: "6px 0 0" }}>
+                    전용면적 기준 값입니다. 연면적 환산은 시설 효율(주거 0.70)이 이미 적용하므로 다시 곱하지 않습니다.
+                  </p>
+                  {rent.housing.notes.map((note) => (
+                    <p key={note} style={{ margin: "6px 0 0" }}>{note}</p>
+                  ))}
+                </div>
+              )}
+
+              {rent.missing.length > 0 && (
+                <div className="report-warning" style={{ marginTop: 10 }}>
+                  임대료 자료가 없는 시설: {rent.missing.join(", ")} — 이 시설들은 매출 0으로 계산됩니다.
+                </div>
+              )}
+
+              <div className="report-source" style={{ marginTop: 8 }}>{rent.note}</div>
+            </>
+          )}
+        </div>
+
+        <div className="report-section"><div className="report-section-head"><div><span>DEMAND FIT</span><br /><strong>개발가능 면적 vs 수요시설 면적</strong></div></div>
+          <table className="report-table"><thead><tr><th>개발안</th><th>지상 GFA</th><th>수요 GFA</th><th>차이</th><th>판정</th></tr></thead><tbody>{analysis.capacities.map((c) => <tr key={c.key}><td>{c.label}</td><td>{formatGfa(c.aboveGroundGfa || null)}</td><td>{formatGfa(c.fullDemandGfa)}</td><td>{c.demandGapGfa === null ? "-" : `${c.demandGapGfa >= 0 ? "+" : ""}${formatGfa(c.demandGapGfa)}`}</td><td><span className={`report-status ${statusTone(c.demandFit)}`}>{c.demandFit}</span></td></tr>)}</tbody></table>
+        </div>
+        <div className="report-page-number">2 / 3</div>
+      </section>
+
+      <section className="report-page">
+        <div className="report-kicker">03 · FEASIBILITY — 사업성 판정</div>
+        <h2 className="report-title">사업성 매트릭스와 추진여부</h2>
+        <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 5% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
         <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
           <div className="report-form-grid">
             <Field label="지하/지상 비율 %" value={assumptions.basementRatioPct} onChange={(v) => setAssumption("basementRatioPct", v)} />
@@ -678,141 +830,41 @@ export default function ReportPage() {
             )}
           </div>
         </div>
-        <div className="report-page-number">1 / 3</div>
-      </section>
-
-      <section className="report-page">
-        <div className="report-kicker">02 · OWNERSHIP / DEMAND</div>
-        <h2 className="report-title">소유·협의대상과 시설수요</h2>
-        <div className="report-grid">
-          <div className="report-card"><h3>소유권 Gate</h3><Metric label="판정" value={ownershipGate} />{records.map((row, i) => <div className="report-owner-row" key={`${row.pnu}-${i}`}><strong>{row.ownerTypeLabel} · {row.ownerClass}</strong><span>{row.legalDong} {row.jibun}</span></div>)}</div>
-          <div className="report-card"><h3>협의대상자</h3><p>1차 · 토지 소유기관</p><p>2차 · 재산관리관·관리권자·운영주체</p><p>3차 · 관리·처분·개발 의사결정권자</p><div className="report-warning">공개 소유정보로 실제 기관명·재산관리관이 확정되지 않으면 “확인 필요”로 유지합니다.</div></div>
-        </div>
-        <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
-          <div className="report-demand-grid"><Field label="PUBLIC Required GFA ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
-        </div>
-        <div className="report-section"><div className="report-section-head"><div><span>RENT</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{rent?.retail?.baseDate ?? ""}</span></div>
-          <div className="report-form-grid no-print admin-only">
-            <div className="report-field">
-              <label>상가 유형</label>
-              <select value={retailSubtype} onChange={(e) => changeRetailSubtype(e.target.value)}>
-                {RETAIL_SUBTYPES.map((item) => <option key={item.code} value={item.code}>{item.label}</option>)}
-              </select>
-            </div>
-            <div className="report-field">
-              <label>상권</label>
-              <select value={tradeArea} onChange={(e) => setTradeArea(e.target.value)}>
-                <option value="">권역 평균 (상권 미지정)</option>
-                {(rent?.retail?.tradeAreaOptions ?? []).map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {item.name} · {item.rentPerSqmMonth.toLocaleString()}원
-                  </option>
-                ))}
-              </select>
-            </div>
-            <Field label="상가 지상 층수" value={retailFloors} onChange={(v) => setRetailFloors(Math.max(1, parseNumber(v) ?? 1))} />
-            <Field label="상가 지하 층수" value={retailBasementFloors} onChange={(v) => setRetailBasementFloors(Math.max(0, parseNumber(v) ?? 0))} />
-          </div>
-
-          {rentError && <div className="report-warning">{rentError}</div>}
-
-          {rent && (
-            <>
-              <table className="report-table"><thead><tr><th>시설</th><th>적용 임대료 원/㎡·월</th><th>지역</th><th>출처</th></tr></thead><tbody>
-                {rent.facilities.map((facility) => (
-                  <tr key={facility.facilityCode}>
-                    <td className="left">{facility.facilityCode}</td>
-                    <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
-                    <td>{facility.geography}</td>
-                    <td className="left">{facility.source ?? facility.originTable}{facility.baseDate ? ` (${facility.baseDate})` : ""}</td>
-                  </tr>
-                ))}
-              </tbody></table>
-
-              {rent.retail && (
-                <div className="report-note" style={{ marginTop: 10 }}>
-                  <strong>리테일 환산 근거</strong> — {rent.retail.geographyName} {rent.retail.subtype} 1층 기준{" "}
-                  {rent.retail.firstFloorRentPerSqmMonth.toLocaleString()}원/㎡·월
-                  {rent.retail.floorRatio
-                    ? ` × 층별효용비율 ${rent.retail.floorRatio.ratioPct}% (지상 ${rent.retail.floors.aboveGround}층·지하 ${rent.retail.floors.basement}층 기준) = ${rent.retail.blendedRentPerSqmMonth?.toLocaleString()}원/㎡·월`
-                    : ""}
-                  <div className="report-source" style={{ marginTop: 6 }}>
-                    매칭 근거 {rent.retail.matchBasis}
-                    {rent.retail.floorRatio ? ` · 효용비율 ${rent.retail.floorRatio.geography} 기준` : ""}
-                    {rent.retail.source ? ` · ${rent.retail.source}` : ""}
-                  </div>
-                  {[...rent.retail.notes, ...(rent.retail.floorRatio?.notes ?? [])].map((note) => (
-                    <p key={note} style={{ margin: "6px 0 0" }}>{note}</p>
-                  ))}
-                </div>
-              )}
-
-              {rent.missing.length > 0 && (
-                <div className="report-warning" style={{ marginTop: 10 }}>
-                  임대료 자료가 없는 시설: {rent.missing.join(", ")} — 이 시설들은 매출 0으로 계산됩니다.
-                </div>
-              )}
-
-              <div className="report-source" style={{ marginTop: 8 }}>{rent.note}</div>
-            </>
-          )}
-        </div>
-
-        <div className="report-section"><div className="report-section-head"><div><span>DEMAND FIT</span><br /><strong>개발가능 면적 vs 수요시설 면적</strong></div></div>
-          <table className="report-table"><thead><tr><th>개발안</th><th>지상 GFA</th><th>수요 GFA</th><th>차이</th><th>판정</th></tr></thead><tbody>{analysis.capacities.map((c) => <tr key={c.key}><td>{c.label}</td><td>{formatGfa(c.aboveGroundGfa || null)}</td><td>{formatGfa(c.fullDemandGfa)}</td><td>{c.demandGapGfa === null ? "-" : `${c.demandGapGfa >= 0 ? "+" : ""}${formatGfa(c.demandGapGfa)}`}</td><td><span className={`report-status ${statusTone(c.demandFit)}`}>{c.demandFit}</span></td></tr>)}</tbody></table>
-        </div>
-        <div className="report-section"><div className="report-section-head"><div><span>COST</span><br /><strong>개발규모별 공사비</strong></div></div>
-          <table className="report-table"><thead><tr><th>개발안</th><th>총 공사 GFA</th><th>Construction CAPEX</th></tr></thead><tbody>{analysis.capacities.map((c) => <tr key={c.key}><td>{c.label}</td><td>{formatGfa(c.totalConstructionGfa)}</td><td>{formatWon(c.constructionCapex)}</td></tr>)}</tbody></table>
-        </div>
-        <div className="report-page-number">2 / 3</div>
-      </section>
-
-      <section className="report-page">
-        <div className="report-kicker">03 · PPP FEASIBILITY / GO-NO GO</div>
-        <h2 className="report-title">사업성 매트릭스와 추진여부</h2>
-        <p className="report-subtitle">토지매입비 0 · 공시지가 기준 연 5% 사용료 · 30/40/50년 · 종료 후 기부채납</p>
         <div className="report-grid three">
-          <div className="report-card"><h3>토지</h3><Metric label="토지가치" value={formatWon(officialLandValue)} /><Metric label="연 사용료" value={formatWon(analysis.annualLandFee)} /></div>
-          <div className="report-card"><h3>BTO / BOT</h3><Metric label="PASS" value="Min DSCR ≥ 1.20" /><Metric label="CONDITIONAL" value="1.00 ≤ Min DSCR < 1.20" /><Metric label="STRONG" value="Min DSCR ≥ 1.30" /></div>
-          <div className="report-card"><h3>REITs</h3><Metric label="PASS" value="Project IRR ≥ 6.5%" /><Metric label="CONDITIONAL" value="4.50% ≤ IRR < 6.5%" /><Metric label="출자자 요구" value={assumptions.investorRequiredReturnPct ? `${assumptions.investorRequiredReturnPct}%` : "별도 입력"} /></div>
+          <div className="report-card"><h3>토지</h3>
+            <Metric label="토지가치" value={formatWon(officialLandValue)} />
+            <Metric label="연 사용료 5%" value={formatWon(analysis.annualLandFee)} />
+          </div>
+          <div className="report-card"><h3>사업구조</h3>
+            <Metric label="구조" value={structurePolicy?.policy.structureName ?? "미선택"} />
+            <Metric label="시설 소유" value={structurePolicy?.policy.ownershipDuringOperation ?? "-"} />
+            <Metric label="시설분 재산세" value={structurePolicy?.policy.propertyTaxApplies ? "부담" : "없음"} />
+          </div>
+          <div className="report-card"><h3>판정 기준</h3>
+            <Metric label="DSCR 기준" value={`≥ ${analysis.dscrPassMin.toFixed(2)}`} />
+            <Metric label="Project IRR 기준" value="≥ 6.5%" />
+            <Metric label="잔존가 처리" value={structurePolicy?.policy.terminalValuePolicy === "EXIT_VALUE" ? "Exit Value" : "0 (귀속·반환)"} />
+          </div>
         </div>
         {structurePolicy && (
-          <div className="report-section">
-            <div className="report-section-head">
-              <div><span>STRUCTURE</span><br /><strong>선택된 사업구조</strong></div>
-              <span className="report-status conditional">{structurePolicy.policy.structureName}</span>
-            </div>
-            <div className="report-grid three">
-              <div className="report-card">
-                <h3>판정 기준</h3>
-                <Metric label="DSCR 기준" value={analysis.dscrPassMin.toFixed(2)} />
-                <Metric label="잔존가 처리" value={structurePolicy.policy.terminalValuePolicy === "EXIT_VALUE" ? "Exit Value" : "0 (귀속·반환)"} />
-              </div>
-              <div className="report-card">
-                <h3>세무 처리</h3>
-                <Metric label="시설 소유" value={structurePolicy.policy.ownershipDuringOperation ?? "-"} />
-                <Metric label="시설분 재산세" value={structurePolicy.policy.propertyTaxApplies ? "부담" : "없음"} />
-              </div>
-              <div className="report-card">
-                <h3>선택 경로</h3>
-                <p>{structurePolicy.resolved.reason}</p>
-              </div>
-            </div>
-            {structurePolicy.unmodelled.length > 0 && (
-              <div className="report-warning">
-                <strong>아직 현금흐름에 반영되지 않은 항목</strong>
-                <ul className="unresolved-list" style={{ marginTop: 8 }}>
-                  {structurePolicy.unmodelled.map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              </div>
-            )}
+          <div className="report-source" style={{ marginTop: -6, marginBottom: 12 }}>
+            구조 선택 경로 — {structurePolicy.resolved.reason}
           </div>
         )}
 
-        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "참고" : "적용"}</span><br /><strong>Minimum DSCR Matrix</strong></div><span className="report-source">기준 DSCR {analysis.dscrPassMin.toFixed(2)}</span></div><Matrix mode="BTO" analysis={analysis} /></div>
-        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "적용" : "참고"}</span><br /><strong>Project IRR Matrix</strong></div></div><Matrix mode="REITS" analysis={analysis} /></div>
+        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "참고" : "적용"}</span><br /><strong>Minimum DSCR Matrix</strong></div><span className="report-source">PASS ≥ {analysis.dscrPassMin.toFixed(2)} · CONDITIONAL 1.00 이상</span></div><Matrix mode="BTO" analysis={analysis} /></div>
+        <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "적용" : "참고"}</span><br /><strong>Project IRR Matrix</strong></div><span className="report-source">PASS ≥ 6.5% · CONDITIONAL 4.50% 이상{assumptions.investorRequiredReturnPct ? ` · 출자자 요구 ${assumptions.investorRequiredReturnPct}%` : ""}</span></div><Matrix mode="REITS" analysis={analysis} /></div>
+
+        {structurePolicy && structurePolicy.unmodelled.length > 0 && (
+          <div className="report-warning">
+            <strong>아직 현금흐름에 반영되지 않은 항목</strong>
+            <ul className="unresolved-list" style={{ marginTop: 8 }}>
+              {structurePolicy.unmodelled.map((item) => <li key={item}>{item}</li>)}
+            </ul>
+          </div>
+        )}
         <div className="report-section report-verdict"><span className={`report-status ${statusTone(finalDecision.status)}`}>{finalDecision.status}</span><strong>{finalDecision.title}</strong><p>{finalDecision.text}</p>{recommendation && <p><b>우선 검토:</b> {recommendation.scenarioLabel} / {recommendation.term}년 · BTO/BOT {recommendation.btoBotStatus} · REITs {recommendation.reitsStatus}</p>}</div>
-        <div className="report-note">실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing, 실제 임대료·OPEX·금리·Lifecycle CAPEX를 반영해 확정합니다. REITs의 6.5%는 INRealtyLab 내부 Project IRR 판정기준(공통 목표수익률)이며, DSCR·IRR 중 하나라도 CONDITIONAL/FAIL이면 종합판정도 그에 따라 조건부 가능/불가로 표시됩니다.</div>
+        <div className="report-source" style={{ marginTop: 12 }}>실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing으로 확정합니다. REITs 6.5%는 INRealtyLab 내부 Project IRR 판정기준이며, DSCR·IRR 중 하나라도 CONDITIONAL/FAIL이면 종합판정도 그에 따릅니다.</div>
         <div className="report-page-number">3 / 3</div>
       </section>
     </main>
