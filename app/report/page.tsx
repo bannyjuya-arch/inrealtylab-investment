@@ -115,6 +115,7 @@ type StructurePolicyResponse = {
     isCeiling: boolean;
     overridden: boolean;
   } | null;
+  taxNotes: string[];
   unmodelled: string[];
 };
 
@@ -867,6 +868,14 @@ export default function ReportPage() {
           <div className="report-source" style={{ marginTop: -6, marginBottom: 12 }}>
             구조 선택 경로 — {structurePolicy.resolved.reason}
             {structurePolicy.trustFee && <> · 신탁보수 근거 — {structurePolicy.trustFee.basis}</>}
+          </div>
+        )}
+        {structurePolicy && structurePolicy.taxNotes?.length > 0 && (
+          <div className="report-note" style={{ marginTop: 0, marginBottom: 12 }}>
+            <strong>보유세 취급</strong>
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              {structurePolicy.taxNotes.map((note) => <li key={note}>{note}</li>)}
+            </ul>
           </div>
         )}
 

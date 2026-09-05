@@ -147,7 +147,9 @@ export async function GET(request: NextRequest) {
           (row) => row.trust_type === "DEVELOPMENT_LAND_TRUST" && row.fee_component === "DEVELOPMENT"
         );
         if (development) {
-          const requested = Number(params.get("trustFeeRatePct"));
+          // Number(null)은 0이라, 파라미터가 없을 때 "사용자가 0%로 지정했다"로 읽히면 안 된다.
+          const rawRate = params.get("trustFeeRatePct");
+          const requested = rawRate === null || rawRate.trim() === "" ? Number.NaN : Number(rawRate);
           const overridden = Number.isFinite(requested) && requested >= 0 && requested <= TRUST_FEE_MAX_PCT;
           const ratePct = overridden ? requested : Number(development.rate_pct);
           trustFee = {
@@ -193,6 +195,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 보유세 취급을 화면에 명시한다.
+    // 종합부동산세 과세대상은 '주택'과 '토지'뿐이고 일반 상업용 건축물은 대상이 아니다(종부세법 §7·§12).
+    // 국공유지 PPP는 토지가 공공 소유라 민간이 토지분 납세의무자가 되지 않으므로,
+    // 상업시설만으로 구성되면 종부세는 걸리지 않고 건물분 재산세만 남는다.
+    const taxNotes: string[] = [
+      "종합부동산세 — 비대상. 과세대상이 주택과 토지로 한정되어 일반 상업용 건축물은 종부세가 부과되지 않고, 국공유지 사업은 토지가 공공 소유라 토지분 납세의무자도 아닙니다.",
+    ];
+    if (policy.property_tax_applies) {
+      taxNotes.push(
+        "건물분 재산세 — 부담. 시설을 민간이 소유하는 구조라 재산세는 납부해야 합니다. 시가표준액 기준값이 DB에 없어 아직 현금흐름에는 반영되지 않았습니다."
+      );
+    }
+    taxNotes.push(
+      "예외 — 시설에 임대주택·노인복지주택이 포함되면 주택분 종부세 검토가 필요합니다. 법인은 공제금액이 0원이고 세율이 2.7~5.0%로 높지만, 합산배제 임대주택과 임대형 노인복지주택은 과세표준에서 제외됩니다(종부세법 §8②)."
+    );
+
     return NextResponse.json({
       ok: true,
       resolved,
@@ -214,6 +232,7 @@ export async function GET(request: NextRequest) {
         trustFeeBasis: trustFee?.basis ?? null,
       },
       trustFee,
+      taxNotes,
       unmodelled,
       available: rows.map((row) => ({ code: row.structure_code, name: row.structure_name })),
     });
