@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const inputs = body?.inputs ?? {};
+  const body = (await req.json().catch(() => ({}))) as {
+    inputs?: { operationYears?: number | string };
+  };
+  const inputs = body.inputs ?? {};
 
   const years = Number(inputs.operationYears ?? 30);
 
