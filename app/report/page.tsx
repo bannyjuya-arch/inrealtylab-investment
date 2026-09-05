@@ -834,10 +834,8 @@ export default function ReportPage() {
                     <td className="left">{facilityLabel(facility.facilityCode)}</td>
                     <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
                     <td>{regionLabel(facility.geography)}</td>
-                    <td className="left">
-                      {facility.rentKind === "DERIVED" || !facility.source
-                        ? INTERNAL_SOURCE_LABEL
-                        : facility.source}
+                    <td className="left" title={facility.source ?? undefined}>
+                      {INTERNAL_SOURCE_LABEL}
                       {facility.baseDate ? ` (${facility.baseDate})` : ""}
                     </td>
                   </tr>
@@ -889,11 +887,14 @@ export default function ReportPage() {
                 </div>
               )}
 
-              <div className="report-source" style={{ marginTop: 8 }}>
+              <div className="report-source" style={{ marginTop: 8 }}>{INTERNAL_SOURCE_LABEL}</div>
+
+              <div className="report-note no-print admin-only" style={{ marginTop: 8 }}>
+                <strong>원자료</strong> —{" "}
                 {[
                   rent.retail ? "한국부동산원 상업용부동산 임대동향조사" : null,
                   rent.housing ? "한국부동산원 전국주택가격동향조사" : null,
-                  rent.facilities.some((item) => item.rentKind === "DERIVED") ? INTERNAL_SOURCE_LABEL : null,
+                  ...rent.facilities.map((item) => (item.source ? `${facilityLabel(item.facilityCode)}: ${item.source}` : null)),
                 ]
                   .filter((item): item is string => item !== null)
                   .join(" · ")}

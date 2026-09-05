@@ -229,7 +229,7 @@ export default function ControlPage() {
         <p>국가 · 지방자치단체 · 공공기관 등 공공소유 부지만 검토합니다. 선택 필지 중 민간소유가 하나라도 확인되면 분석을 종료합니다.</p>
       </section>
 
-      <form className="control-search" onSubmit={handleSubmit}>
+      <form className="control-search admin-only" onSubmit={handleSubmit}>
         <input
           value={pnu}
           onChange={(event) => setPnu(event.target.value.replace(/\D/g, "").slice(0, 19))}
