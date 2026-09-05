@@ -184,7 +184,7 @@ export default function RentBenchmarkPanel() {
     setMessage("");
     try {
       await load("C04_LIVING", true);
-      setMessage(`리빙 최근 실거래(${previousMonthYmd()})를 갱신했습니다.`);
+      setMessage(`임대주택 최근 실거래(${previousMonthYmd()})를 갱신했습니다.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "리빙 실거래 갱신 실패");
     } finally {
@@ -255,13 +255,13 @@ export default function RentBenchmarkPanel() {
 
       {officeRows.length > 1 && (
         <div style={{ marginTop: 12, fontSize: 13 }}>
-          <strong>오피스 권역 DB:</strong>{" "}
+          <strong>오피스 권역별 임대료:</strong>{" "}
           {officeRows.map((row) => `${row.submarket ?? "서울"} ${formatRent(row.rent_per_sqm_month)}`).join(" · ")}
         </div>
       )}
 
       <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" onClick={refreshLiving} disabled={loading}>리빙 최근 실거래 DB 갱신</button>
+        <button type="button" onClick={refreshLiving} disabled={loading}>임대주택 최근 실거래 갱신</button>
         <span style={{ fontSize: 12, opacity: 0.72 }}>보증금 환산은 아직 적용하지 않고 실제 월세가 존재하는 거래의 ㎡당 월세 중앙값만 사용합니다.</span>
       </div>
 

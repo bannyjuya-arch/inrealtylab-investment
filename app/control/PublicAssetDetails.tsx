@@ -92,7 +92,7 @@ export default function PublicAssetDetails({
         공개자료 소재지 {result.asset.location || "-"}<br />
         재산구분 원문 {result.asset.assetKind || "-"}<br />
         자료 기준일 {result.source?.dataDate ?? "-"}<br />
-        상태 <b>REFERENCE · 최신 확인 필요</b>
+        상태 <b>참고자료 · 최신 확인 필요</b>
       </div>
       <small>{result.source?.note}</small>
     </div>

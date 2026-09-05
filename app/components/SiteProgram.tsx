@@ -397,7 +397,7 @@ export default function SiteProgram() {
 
       {/* ── 지을 수 있는 용도 ── */}
       <div className="control-section-title" style={{ marginTop: 26 }}>
-        <span>ALLOWED USE</span>
+        <span>지을 수 있는 용도</span>
         <strong>지을 수 있는 용도</strong>
       </div>
       {allowedUseError && <div className="control-error">{allowedUseError}</div>}
@@ -444,7 +444,7 @@ export default function SiteProgram() {
 
       {/* ── 개발가능 규모 ── */}
       <div className="control-section-title" style={{ marginTop: 26 }}>
-        <span>CAPACITY</span>
+        <span>개발가능 규모</span>
         <strong>개발가능 규모</strong>
       </div>
       {regulation && effectiveLimit && statutoryCapacity ? (

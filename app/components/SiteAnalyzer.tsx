@@ -457,11 +457,11 @@ export default function SiteAnalyzer() {
 
       <header className="site-analyzer-header">
         <div>
-          <div className="product-kicker">INREALTYLAB · STEP 1 부지</div>
+          <div className="product-kicker">인리얼티 · STEP 1 부지</div>
           <h1>토지의 종류부터 가립니다</h1>
           <p>국공유지인지 아닌지를 먼저 확인합니다. 국공유지만 다음 단계로 넘어갑니다.</p>
         </div>
-        <div className="beta-chip">CORE v0.5</div>
+        <div className="beta-chip">시범버전</div>
       </header>
 
       <form className="map-search" onSubmit={handleSearch}>

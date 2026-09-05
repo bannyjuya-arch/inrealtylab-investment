@@ -24,7 +24,7 @@ export default function ReportLauncher() {
     <section style={{ maxWidth: 1180, margin: "0 auto 40px", padding: "0 20px" }}>
       <div className="project-direction-card" style={{ marginTop: 20 }}>
         <div className="control-section-title">
-          <span>PART 3 · EXECUTIVE REPORT</span>
+          <span>통합 검토보고서</span>
           <strong>수요 · 사업성 · 사업추진 약식검토</strong>
         </div>
         <p className="direction-note">

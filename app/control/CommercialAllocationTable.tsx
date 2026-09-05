@@ -250,7 +250,7 @@ export default function CommercialAllocationTable() {
 
   function updateArea(code: string, raw: string) {
     if (commercialPoolGfaSqm == null || commercialPoolGfaSqm <= 0) {
-      setMessage("수익시설 Pool 면적을 먼저 확인해야 합니다.");
+      setMessage("수익시설 배분면적을 먼저 확인해야 합니다.");
       return;
     }
     const area = Math.max(0, Math.min(commercialPoolGfaSqm, Number(raw || 0)));
@@ -324,7 +324,7 @@ export default function CommercialAllocationTable() {
   return (
     <section className="control-section commercial-allocation-section">
       <div className="control-section-title">
-        <span>COMMERCIAL PROGRAM</span>
+        <span>수익시설 구성</span>
         <strong>수익시설 비율 · 면적 · 공사비 직접 검토</strong>
       </div>
 
@@ -336,7 +336,7 @@ export default function CommercialAllocationTable() {
       <div className="metric-grid" style={{ marginBottom: 16 }}>
         <div><span>시나리오</span><strong>{scenario?.scenario_name ?? "균형형"}</strong></div>
         <div><span>수익시설 비중</span><strong>{scenario?.commercial_ratio_pct ?? 60}%</strong></div>
-        <div><span>수익시설 Pool</span><strong>{commercialPoolGfaSqm ? `${Math.round(commercialPoolGfaSqm).toLocaleString("ko-KR")}㎡` : "확인 필요"}</strong></div>
+        <div><span>수익시설 배분면적</span><strong>{commercialPoolGfaSqm ? `${Math.round(commercialPoolGfaSqm).toLocaleString("ko-KR")}㎡` : "확인 필요"}</strong></div>
       </div>
 
       <div style={{ overflowX: "auto" }}>
@@ -385,7 +385,7 @@ export default function CommercialAllocationTable() {
       <div className="control-policy-card" style={{ marginTop: 16 }}>
         <strong>합계 {total.toFixed(1)}% · 잔여 {remaining.toFixed(1)}%</strong>
         <p>{complete ? "100% 배분 완료 — 시설별 연면적과 사업비를 확정할 수 있습니다." : "비율 또는 면적을 직접 입력해 100%까지 배분해 주세요."}</p>
-        <p>공사비 기본값은 현재 DB의 대표 벤치마크 평균을 VAT 제외 기준으로 통일한 값이며, 사용자가 직접 수정할 수 있습니다.</p>
+        <p>공사비 기본값은 보유 기준자료의 평균을 부가세 제외 기준으로 통일한 값이며, 직접 수정할 수 있습니다.</p>
         <button type="button" onClick={save} disabled={loading}>{loading ? "저장 중" : "비율·면적 저장"}</button>
       </div>
 
@@ -403,7 +403,7 @@ export default function CommercialAllocationTable() {
 
       <div className="control-policy-card" style={{ marginTop: 12 }}>
         <strong>PF 대출비율(LTC) {ltcPct}%</strong>
-        <p>기본 75% · 선택범위 70~80% · 1% 단위. 대출금액은 총사업비 × LTC로 자동 계산합니다.</p>
+        <p>기본 75% · 선택범위 70~80% · 1% 단위. 대출금액은 총사업비 × 대출비율로 자동 계산합니다.</p>
         <input
           type="range"
           min={MIN_LTC_PCT}

@@ -301,7 +301,7 @@ export default function ControlPage() {
             <>
               <section className="control-section">
                 <div className="control-section-title">
-                  <span>CONTROL CHECK</span>
+                  <span>선결조건</span>
                   <strong>사업추진 선결조건</strong>
                 </div>
                 <div className="gate-list">
@@ -316,7 +316,7 @@ export default function ControlPage() {
 
               <section className="control-section">
                 <div className="control-section-title">
-                  <span>DELIVERY OPTIONS</span>
+                  <span>추진방식</span>
                   <strong>1차 사업추진 방식 후보</strong>
                 </div>
                 <div className="route-list">
@@ -328,13 +328,13 @@ export default function ControlPage() {
               </section>
 
               <section className="control-section">
-                <div className="control-section-title"><span>NEXT DATA</span><strong>추가 확인 필요정보</strong></div>
+                <div className="control-section-title"><span>추가 확인</span><strong>추가 확인 필요정보</strong></div>
                 <ul className="unresolved-list">{unresolved.map((item) => <li key={item}>{item}</li>)}</ul>
               </section>
 
               <section className="project-direction-card">
                 <div className="control-section-title">
-                  <span>PROJECT DIRECTION</span>
+                  <span>추진방향</span>
                   <strong>사업추진 방향</strong>
                 </div>
 
@@ -350,7 +350,7 @@ export default function ControlPage() {
                   <div className="direction-block">
                     <span>현재 확인</span>
                     <ul>
-                      <li><strong>공공소유</strong><b>PASS</b></li>
+                      <li><strong>공공소유</strong><b>확인</b></li>
                       <li><strong>소유유형</strong><b>{ownerTypeLabels.join(", ") || "확인 필요"}</b></li>
                       <li><strong>소유구분</strong><b>{ownerClasses.join(", ") || "확인 필요"}</b></li>
                     </ul>
@@ -388,7 +388,7 @@ export default function ControlPage() {
           )}
 
           <section className="source-trace-card">
-            <strong>Source Trace</strong>
+            <strong>자료 출처</strong>
             <dl>
               <div><dt>출처</dt><dd>VWorld 국토정보 토지소유정보</dd></div>
               <div><dt>조회 필지수</dt><dd>{parcelResults.length}필지</dd></div>
