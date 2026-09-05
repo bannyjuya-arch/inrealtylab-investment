@@ -524,14 +524,14 @@ export default function SiteAnalyzer() {
                     <p>주소 검색 또는 지도 클릭으로 실제 필지를 선택할 수 있습니다.</p>
                   </div>
                 ) : (
+                  // PNU는 내부 식별자라 화면에 노출하지 않는다. 확인이 필요하면 카드에 마우스를 올린다.
                   parcels.map((parcel, index) => (
-                    <article className="parcel-card" key={parcel.id}>
+                    <article className="parcel-card" key={parcel.id} title={`PNU ${parcel.pnu}`}>
                       <div className="parcel-card-head">
                         <span>필지 {index + 1}</span>
                         <button type="button" onClick={() => removeParcel(parcel.id)}>제거</button>
                       </div>
                       <dl>
-                        <div><dt>PNU</dt><dd>{parcel.pnu}</dd></div>
                         <div><dt>법정동</dt><dd>{parcel.legalDong}</dd></div>
                         <div><dt>지번</dt><dd>{parcel.jibun}</dd></div>
                         <div><dt>지목</dt><dd>{parcel.jimok}</dd></div>

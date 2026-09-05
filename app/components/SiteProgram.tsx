@@ -71,6 +71,16 @@ type AllowedUseData = {
   source: { code: string; name: string; endpoints: string[]; baseDate: string; queriedAt: string; note: string };
 };
 
+type OrdinanceLimit = {
+  bcrMaxPct: number | null;
+  farMaxPct: number | null;
+  farMaxPctSpecial: number | null;
+  specialScope: string | null;
+  legalBasis: string;
+  note: string | null;
+  baseDate: string | null;
+};
+
 export type Step1Snapshot = {
   pnus: string[];
   siteAreaSqm: number;
@@ -120,6 +130,7 @@ export default function SiteProgram() {
   const [regulation, setRegulation] = useState<RegulationData | null>(null);
   const [regulationError, setRegulationError] = useState("");
   const [allowedUse, setAllowedUse] = useState<AllowedUseData | null>(null);
+  const [ordinanceLimit, setOrdinanceLimit] = useState<OrdinanceLimit | null>(null);
   const [allowedUseError, setAllowedUseError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -179,7 +190,7 @@ export default function SiteProgram() {
             : null;
           const gfaParam = legalGfa && legalGfa > 0 ? `&aboveGroundGfaSqm=${encodeURIComponent(legalGfa)}` : "";
           const response = await fetch(
-            `/api/allowed-use?pnu=${encodeURIComponent(pnus[0])}&zoneName=${encodeURIComponent(zoneName)}&scenarioCode=BASE${gfaParam}`
+            `/api/allowed-use?pnu=${encodeURIComponent(pnus[0])}&zoneName=${encodeURIComponent(zoneName)}&scenarioCode=BASE&siteAreaSqm=${encodeURIComponent(siteAreaSqm)}${gfaParam}`
           );
           const data = await response.json();
           if (!response.ok || !data.ok) throw new Error(data?.message ?? "건축 가능시설 조회에 실패했습니다.");
@@ -191,6 +202,7 @@ export default function SiteProgram() {
               diagnostics: data.diagnostics,
               source: data.source,
             });
+            setOrdinanceLimit((data.ordinanceLimit as OrdinanceLimit | null) ?? null);
           }
           // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설과 면적 상한을 걸러낼 때 쓴다.
           const facilities: AllowedUseFacility[] = data.facilities ?? [];
@@ -236,22 +248,66 @@ export default function SiteProgram() {
 
   const totalArea = snapshot?.siteAreaSqm ?? 0;
 
-  const statutoryCapacity = useMemo(() => {
-    const limit = regulation?.statutoryLimit;
-    if (!limit || totalArea <= 0) return null;
+  // 국가 시행령 상한과 지자체 조례 상한 중 더 엄격한 값이 실제 상한이다.
+  // 조례를 안 보면 제2종일반주거를 250%로 잡아 연면적이 25% 과대 계산된다.
+  const effectiveLimit = useMemo(() => {
+    const national = regulation?.statutoryLimit;
+    if (!national) return null;
+    const bcrCandidates = [national.bcrMax, ordinanceLimit?.bcrMaxPct].filter(
+      (value): value is number => typeof value === "number" && value > 0
+    );
+    const farCandidates = [national.farMax, ordinanceLimit?.farMaxPct].filter(
+      (value): value is number => typeof value === "number" && value > 0
+    );
+    const bcrMax = Math.min(...bcrCandidates);
+    const farMax = Math.min(...farCandidates);
+    const bindsBcr = ordinanceLimit?.bcrMaxPct != null && ordinanceLimit.bcrMaxPct < national.bcrMax;
+    const bindsFar = ordinanceLimit?.farMaxPct != null && ordinanceLimit.farMaxPct < national.farMax;
     return {
-      footprint: totalArea * (limit.bcrMax / 100),
-      grossFloorArea: totalArea * (limit.farMax / 100),
+      bcrMax,
+      farMax,
+      bindsBcr,
+      bindsFar,
+      legalBasis: bindsBcr || bindsFar ? ordinanceLimit!.legalBasis : national.legalBasis,
+      nationalBcr: national.bcrMax,
+      nationalFar: national.farMax,
     };
-  }, [regulation, totalArea]);
+  }, [regulation, ordinanceLimit]);
+
+  // 조례 상한이 국가 상한보다 낮으면 STEP 3이 읽는 스냅샷도 그 값으로 덮어쓴다.
+  useEffect(() => {
+    if (!effectiveLimit || !snapshot) return;
+    try {
+      const previous = sessionStorage.getItem("inrealtylab.part1Snapshot");
+      sessionStorage.setItem(
+        "inrealtylab.part1Snapshot",
+        JSON.stringify({
+          ...(previous ? JSON.parse(previous) : {}),
+          statutoryBcrMaxPct: effectiveLimit.bcrMax,
+          statutoryFarMaxPct: effectiveLimit.farMax,
+          limitLegalBasis: effectiveLimit.legalBasis,
+        })
+      );
+    } catch {
+      // 스토리지를 못 쓰면 STEP 3에서 값을 직접 입력하게 된다.
+    }
+  }, [effectiveLimit, snapshot]);
+
+  const statutoryCapacity = useMemo(() => {
+    if (!effectiveLimit || totalArea <= 0) return null;
+    return {
+      footprint: totalArea * (effectiveLimit.bcrMax / 100),
+      grossFloorArea: totalArea * (effectiveLimit.farMax / 100),
+    };
+  }, [effectiveLimit, totalArea]);
 
   const capacityScenarios = useMemo(() => {
-    const limit = regulation?.statutoryLimit;
+    const limit = effectiveLimit;
     if (!limit || totalArea <= 0) return [];
     return [
       { name: "보수 검토", bcr: limit.bcrMax * 0.8, far: limit.farMax * 0.8, note: "법정상한의 80% 사업검토 가정", status: "ASSUMPTION" },
       { name: "기준 검토", bcr: limit.bcrMax * 0.9, far: limit.farMax * 0.9, note: "법정상한의 90% 사업검토 가정", status: "ASSUMPTION" },
-      { name: "법정 최대", bcr: limit.bcrMax, far: limit.farMax, note: "현재 연결된 국가 법정상한", status: "STATUTORY" },
+      { name: "법정 최대", bcr: limit.bcrMax, far: limit.farMax, note: limit.legalBasis, status: "STATUTORY" },
     ].map((item) => {
       const footprint = totalArea * (item.bcr / 100);
       const grossFloorArea = totalArea * (item.far / 100);
@@ -263,7 +319,7 @@ export default function SiteProgram() {
         grossFloorAreaPyeong: grossFloorArea / 3.305785,
       };
     });
-  }, [regulation, totalArea]);
+  }, [effectiveLimit, totalArea]);
 
   if (!snapshot) {
     return (
@@ -303,8 +359,14 @@ export default function SiteProgram() {
         <>
           <div className="metric-grid">
             <div><span>주요 용도지역</span><strong>{regulation.primaryZone ?? "확인 필요"}</strong></div>
-            <div><span>건폐율 상한</span><strong>{regulation.statutoryLimit ? formatPct(regulation.statutoryLimit.bcrMax) : "-"}</strong></div>
-            <div><span>용적률 상한</span><strong>{regulation.statutoryLimit ? formatPct(regulation.statutoryLimit.farMax) : "-"}</strong></div>
+            <div>
+              <span>건폐율 상한</span>
+              <strong>{effectiveLimit ? formatPct(effectiveLimit.bcrMax) : "-"}</strong>
+            </div>
+            <div>
+              <span>용적률 상한</span>
+              <strong>{effectiveLimit ? formatPct(effectiveLimit.farMax) : "-"}</strong>
+            </div>
           </div>
 
           <div className="regulation-groups">
@@ -316,11 +378,17 @@ export default function SiteProgram() {
             <RegulationGroup title="토지거래허가" items={regulation.landTransactionPermit} />
           </div>
 
-          {regulation.statutoryLimit && (
+          {regulation.statutoryLimit && effectiveLimit && (
             <div className="source-note">
-              <strong>{regulation.statutoryLimit.legalBasis}</strong>
+              <strong>{effectiveLimit.legalBasis}</strong>
               <span>시행기준 {regulation.statutoryLimit.effectiveDate}</span>
               <p>{regulation.statutoryLimit.scope}</p>
+              {(effectiveLimit.bindsBcr || effectiveLimit.bindsFar) && (
+                <p>
+                  국가 시행령 상한(건폐율 {formatPct(effectiveLimit.nationalBcr)} · 용적률{" "}
+                  {formatPct(effectiveLimit.nationalFar)})보다 조례가 더 엄격해 조례 값을 적용했습니다.
+                </p>
+              )}
             </div>
           )}
           {regulation.warnings.map((warning) => <div className="control-warning" key={warning}>{warning}</div>)}
@@ -379,12 +447,12 @@ export default function SiteProgram() {
         <span>CAPACITY</span>
         <strong>개발가능 규모</strong>
       </div>
-      {regulation && regulation.statutoryLimit && statutoryCapacity ? (
+      {regulation && effectiveLimit && statutoryCapacity ? (
         <>
           <div className="capacity-basis">
             <span>현재 계산 기준</span>
-            <strong>{regulation.primaryZone ?? regulation.statutoryLimit.zoneName}</strong>
-            <p>대지 {formatArea(totalArea)} · BCR {formatPct(regulation.statutoryLimit.bcrMax)} · FAR {formatPct(regulation.statutoryLimit.farMax)}</p>
+            <strong>{regulation.primaryZone ?? regulation.statutoryLimit?.zoneName ?? "-"}</strong>
+            <p>대지 {formatArea(totalArea)} · BCR {formatPct(effectiveLimit.bcrMax)} · FAR {formatPct(effectiveLimit.farMax)}</p>
           </div>
 
           <div className="metric-grid capacity-metrics">
@@ -396,12 +464,12 @@ export default function SiteProgram() {
             <div>
               <span>법정 최대 건축면적</span>
               <strong>{formatArea(statutoryCapacity.footprint)}</strong>
-              <small>BCR {formatPct(regulation.statutoryLimit.bcrMax)}</small>
+              <small>BCR {formatPct(effectiveLimit.bcrMax)}</small>
             </div>
             <div>
               <span>법정 최대 연면적</span>
               <strong>{formatArea(statutoryCapacity.grossFloorArea)}</strong>
-              <small>FAR {formatPct(regulation.statutoryLimit.farMax)}</small>
+              <small>FAR {formatPct(effectiveLimit.farMax)}</small>
             </div>
           </div>
 
@@ -434,10 +502,25 @@ export default function SiteProgram() {
             <span>어떤 값이 계산에 들어갔는지 추적합니다.</span>
           </div>
           <div className="capacity-status-list">
-            <CapacityStatus label="대지면적 / PNU" status="반영" tone="ok" detail="VWorld 지적 필지" />
+            <CapacityStatus label="대지면적" status="반영" tone="ok" detail="VWorld 지적 필지" />
             <CapacityStatus label="용도지역" status="반영" tone="ok" detail={regulation.primaryZone ?? "세부지역 확인 필요"} />
             <CapacityStatus label="건축 가능시설" status={allowedUse ? "판정" : "미조회"} tone={allowedUse ? "ok" : "pending"} detail={allowedUse ? allowedUse.source.name : "판정 실패"} />
-            <CapacityStatus label="국가 건폐율·용적률" status="반영" tone="ok" detail={regulation.statutoryLimit.legalBasis} />
+            <CapacityStatus
+              label="국가 건폐율·용적률"
+              status="반영"
+              tone="ok"
+              detail={regulation.statutoryLimit?.legalBasis ?? "국토계획법 시행령"}
+            />
+            <CapacityStatus
+              label="조례 건폐율·용적률"
+              status={ordinanceLimit ? "반영" : "미반영"}
+              tone={ordinanceLimit ? "ok" : "pending"}
+              detail={
+                ordinanceLimit
+                  ? `${ordinanceLimit.legalBasis} · 건폐율 ${ordinanceLimit.bcrMaxPct ?? "-"}% · 용적률 ${ordinanceLimit.farMaxPct ?? "-"}%`
+                  : "해당 지자체 조례 상한 미확보 — 국가 상한으로 계산"
+              }
+            />
             <CapacityStatus
               label="지자체 조례"
               status={allowedUse?.diagnostics.hasLocalLayer ? "반영" : "미반영"}
