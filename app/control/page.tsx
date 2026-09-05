@@ -85,7 +85,7 @@ export default function ControlPage() {
   async function lookupPnus(pnus: string[]) {
     const validPnus = unique(pnus.map((item) => item.trim())).filter(isValidPnu);
     if (!validPnus.length) {
-      setPageError("유효한 PNU가 없습니다. 현황분석에서 필지를 다시 선택해 주세요.");
+      setPageError("선택된 필지가 없습니다. 현황분석에서 필지를 다시 선택해 주세요.");
       setParcelResults([]);
       return;
     }
@@ -130,7 +130,7 @@ export default function ControlPage() {
     event.preventDefault();
     const value = pnu.trim();
     if (!isValidPnu(value)) {
-      setPageError("PNU는 19자리이며 11번째 자리는 일반필지 1 또는 산 2여야 합니다.");
+      setPageError("필지 고유번호는 19자리이며 11번째 자리는 일반필지 1 또는 산 2여야 합니다.");
       setParcelResults([]);
       return;
     }
@@ -155,7 +155,7 @@ export default function ControlPage() {
       return {
         status: "PRIVATE",
         headline: "민간소유 포함 — 현재 검토대상 제외",
-        summary: "선택 필지 중 민간소유가 포함되어 현재 INRealtyLab Part 2 분석대상에서 제외합니다.",
+        summary: "선택 필지 중 민간소유가 포함되어 현재 검토대상에서 제외합니다.",
       };
     }
 
@@ -217,25 +217,25 @@ export default function ControlPage() {
     <main className="control-shell">
       <header className="control-header">
         <div>
-          <div className="product-kicker">INRealtyLab · Part 2</div>
+          <div className="product-kicker">인리얼티 · 소유와 사업구조</div>
           <h1>소유 · 사업추진 가능성 분석</h1>
-          <p>현황분석에서 선택한 필지의 PNU를 자동으로 넘겨 공공소유 여부부터 확인합니다.</p>
+          <p>현황분석에서 선택한 필지를 그대로 넘겨받아 공공소유 여부부터 확인합니다.</p>
         </div>
         <a className="control-back" href="/">현황분석으로</a>
       </header>
 
       <section className="control-policy-card">
         <strong>현재 분석대상</strong>
-        <p>국가 · 지방자치단체 · 공공기관 등 공공소유 부지만 검토합니다. 선택 필지 중 민간소유가 하나라도 확인되면 Part 2 분석을 종료합니다.</p>
+        <p>국가 · 지방자치단체 · 공공기관 등 공공소유 부지만 검토합니다. 선택 필지 중 민간소유가 하나라도 확인되면 분석을 종료합니다.</p>
       </section>
 
       <form className="control-search" onSubmit={handleSubmit}>
         <input
           value={pnu}
           onChange={(event) => setPnu(event.target.value.replace(/\D/g, "").slice(0, 19))}
-          placeholder="현황분석에서 자동 전달 · 필요 시 PNU 직접 입력"
+          placeholder="현황분석에서 자동 전달 · 필요 시 필지 고유번호 직접 입력"
           inputMode="numeric"
-          aria-label="PNU 입력"
+          aria-label="필지 고유번호 입력"
         />
         <button disabled={loading} type="submit">{loading ? "자동 조회 중" : "다시 조회"}</button>
       </form>
@@ -248,7 +248,7 @@ export default function ControlPage() {
           <section className="control-summary-card">
             <div className="control-summary-head">
               <div>
-                <span>OWNERSHIP GATE · {parcelResults.length} PARCELS</span>
+                <span>소유권 판정 · 필지 {parcelResults.length}개</span>
                 <strong>{overall.headline}</strong>
               </div>
               <span className={`control-badge ${overall.status === "PUBLIC" ? "public" : overall.status === "PRIVATE" ? "private" : "review"}`}>
@@ -258,7 +258,7 @@ export default function ControlPage() {
             <p>{overall.summary}</p>
           </section>
 
-          {/* 2026-09-03: 기존 Part 1의 REGULATION·USE·CAPACITY를 STEP 2로 이관 */}
+          {/* 2026-09-03: 기존 현황분석의 규제·용도·규모 검토를 이 화면으로 이관 */}
           <SiteProgram />
 
           {/* 2026-09-03: 사업방식·사업주체 두 축 선택 */}
@@ -269,7 +269,7 @@ export default function ControlPage() {
 
           <section className="control-section">
             <div className="control-section-title">
-              <span>PARCEL OWNERSHIP</span>
+              <span>소유 확인</span>
               <strong>필지별 소유확인</strong>
             </div>
             <div className="route-list">
@@ -280,8 +280,7 @@ export default function ControlPage() {
                   <article key={parcelPnu} style={{ display: "block" }}>
                     <span>{String(index + 1).padStart(2, "0")}</span>
                     <strong>{assessment?.ownerClasses.join(", ") || result.message || "확인 필요"}</strong>
-                    <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6 }}>
-                      PNU {parcelPnu}<br />
+                    <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6 }} title={`PNU ${parcelPnu}`}>
                       {record?.legalDong ? `${record.legalDong} ${record.jibun}` : "소재지 정보 확인 필요"}<br />
                       소유주체 유형 {record?.ownerTypeLabel ?? "확인 필요"}
                     </div>

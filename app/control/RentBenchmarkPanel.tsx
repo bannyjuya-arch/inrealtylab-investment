@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { COMMERCIAL_CATEGORIES } from "@/lib/integrated-report";
 
 type DbFacilityCode = "C01_OFFICE" | "C02_RETAIL" | "C04_LIVING";
 type FacilityCode =
@@ -50,18 +51,38 @@ type FacilityDefinition = {
   dbLinked: boolean;
 };
 
-const FACILITIES: FacilityDefinition[] = [
-  { code: "C01_OFFICE", label: "C01 오피스", description: "서울 권역별 시장 임대료", dbLinked: true },
-  { code: "C02_RETAIL", label: "C02 리테일", description: "R-ONE 상권 임대시세", dbLinked: true },
-  { code: "C03_HOSPITALITY", label: "C03 숙박", description: "시범검토 기본값", dbLinked: false },
-  { code: "C04_LIVING", label: "C04 리빙", description: "국토부 전월세 실거래 기반", dbLinked: true },
-  { code: "C05_HEALTHCARE", label: "C05 헬스케어", description: "시범검토 기본값", dbLinked: false },
-  { code: "C06_EDUCATION", label: "C06 교육", description: "시범검토 기본값", dbLinked: false },
-  { code: "C07_CULTURE_ENTERTAINMENT", label: "C07 문화·엔터", description: "시범검토 기본값", dbLinked: false },
-  { code: "C08_RND_LAB", label: "C08 R&D / LAB", description: "시범검토 기본값", dbLinked: false },
-  { code: "C09_LOGISTICS", label: "C09 물류", description: "시범검토 기본값", dbLinked: false },
-  { code: "C10_DIGITAL_INFRA", label: "C10 디지털인프라", description: "시범검토 기본값", dbLinked: false },
-];
+// 2026-09-05: 시설 이름을 여기서 또 짓지 않는다. 이름은 COMMERCIAL_CATEGORIES 한 곳에서만 오고
+// 화면에는 DB 코드(C01…)를 붙이지 않는다. description은 그 시설의 임대료가 어디서 오는지만 적는다.
+const FACILITY_SOURCE: Record<string, { description: string; dbLinked: boolean }> = {
+  C01_OFFICE: { description: "서울 권역별 시장 임대료", dbLinked: true },
+  C02_RETAIL: { description: "한국부동산원 상권별 임대시세 · 층별효용비율 적용", dbLinked: true },
+  C03_HOSPITALITY: { description: "임대료 자료 없음 — 가동률·객단가 모델 필요", dbLinked: false },
+  C04_LIVING: { description: "국토부 전월세 실거래 · 전월세전환율 환산", dbLinked: true },
+  C05_HEALTHCARE: { description: "임대주택 임대료에서 파생 (인리얼티 내부 DB 분석 기준)", dbLinked: false },
+  C06_EDUCATION: { description: "임대료 자료 없음", dbLinked: false },
+  C07_CULTURE_ENTERTAINMENT: { description: "임대료 자료 없음", dbLinked: false },
+  C08_RND_LAB: { description: "오피스 임대료에서 파생 (인리얼티 내부 DB 분석 기준)", dbLinked: false },
+  C09_LOGISTICS: { description: "임대료 자료 없음", dbLinked: false },
+  C10_DIGITAL_INFRA: { description: "원/kW·월 단가라 ㎡ 환산 불가 — 별도 모델 필요", dbLinked: false },
+};
+
+/** 서브마켓 코드는 리서치 용어라 화면에는 한글 권역명으로 바꿔 보여준다. */
+const REGION_LABEL: Record<string, string> = {
+  CBD: "도심권역", GBD: "강남권역", YBD: "여의도권역",
+  Others: "서울 기타권역", Pangyo: "판교", Bundang: "분당",
+  "Capital Area": "수도권", SEOUL_TOTAL: "서울 전체", NATION: "전국",
+};
+function regionLabel(value: string | null | undefined) {
+  if (!value) return null;
+  return REGION_LABEL[value] ?? value;
+}
+
+const FACILITIES: FacilityDefinition[] = COMMERCIAL_CATEGORIES.map((item) => ({
+  code: item.key as FacilityCode,
+  label: item.label,
+  description: FACILITY_SOURCE[item.key]?.description ?? "임대료 자료 없음",
+  dbLinked: FACILITY_SOURCE[item.key]?.dbLinked ?? false,
+}));
 
 const DB_FACILITIES = FACILITIES.filter((facility): facility is FacilityDefinition & { code: DbFacilityCode } => facility.dbLinked);
 const ZERO_RENT_FACILITIES = FACILITIES.filter((facility) => !facility.dbLinked);
@@ -176,13 +197,13 @@ export default function RentBenchmarkPanel() {
   return (
     <section className="control-section rent-benchmark-section">
       <div className="control-section-title">
-        <span>OPERATING RENT DB</span>
-        <strong>C01~C10 시범 임대료 기준</strong>
+        <span>임대료 기준</span>
+        <strong>시설별 적용 임대료</strong>
       </div>
 
       <div className="control-policy-card">
         <strong>시범검토 적용 원칙</strong>
-        <p>C01 오피스·C02 리테일·C04 리빙만 임대료 DB 후보값을 사용합니다. C03·C05·C06·C07·C08·C09·C10은 DB 구축 전까지 0원/㎡·월로 고정합니다.</p>
+        <p>오피스·리테일·임대주택은 시장 조사자료에서 임대료를 가져옵니다. 실버하우스·헬스케어와 R&amp;D·랩은 각각 임대주택·오피스 임대료에서 파생합니다. 나머지 시설은 근거자료가 없어 임의로 채우지 않고 0원/㎡·월로 둡니다.</p>
       </div>
 
       <div style={{ overflowX: "auto" }}>
@@ -206,7 +227,7 @@ export default function RentBenchmarkPanel() {
                     <td style={{ padding: 10 }}>-</td>
                     <td style={{ padding: 10, textAlign: "right" }}><strong>{formatRent(0)}</strong></td>
                     <td style={{ padding: 10, textAlign: "center" }}>시범검토</td>
-                    <td style={{ padding: 10 }}>DB 미구축 · 0원 고정</td>
+                    <td style={{ padding: 10 }}>근거자료 없음 · 0원</td>
                     <td style={{ padding: 10, textAlign: "right" }}>-</td>
                   </tr>
                 );
@@ -220,7 +241,7 @@ export default function RentBenchmarkPanel() {
               return (
                 <tr key={facility.code}>
                   <td style={{ padding: 10 }}><strong>{facility.label}</strong><div style={{ fontSize: 12, opacity: 0.7 }}>{facility.description}</div></td>
-                  <td style={{ padding: 10 }}>{preferred?.submarket ?? preferred?.geography_name ?? (code === "C02_RETAIL" ? "상권자료 대기" : "-")}</td>
+                  <td style={{ padding: 10 }}>{regionLabel(preferred?.submarket ?? preferred?.geography_name) ?? (code === "C02_RETAIL" ? "상권자료 대기" : "-")}</td>
                   <td style={{ padding: 10, textAlign: "right" }}><strong>{formatRent(preferred?.rent_per_sqm_month)}</strong></td>
                   <td style={{ padding: 10, textAlign: "center" }}>{preferred?.base_date ?? "-"}</td>
                   <td style={{ padding: 10 }}>{preferred?.source_name ?? preferred?.source_code ?? response?.note ?? "-"}</td>

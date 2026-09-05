@@ -285,7 +285,7 @@ export default function CommercialAllocationTable() {
 
   async function save() {
     if (!/^\d{19}$/.test(pnu)) {
-      setMessage("유효한 PNU가 없습니다.");
+      setMessage("선택된 필지가 없습니다.");
       return;
     }
 
@@ -419,7 +419,7 @@ export default function CommercialAllocationTable() {
 
       <div className="control-policy-card" style={{ marginTop: 12 }}>
         <strong>PF 적용금리 {pfRatePct.toFixed(1)}%</strong>
-        <p>기본 7.0% · 선택범위 5.0~9.0% · 0.1% 단위. 선택한 금리는 Part 3 DSCR 계산에 직접 적용됩니다.</p>
+        <p>기본 7.0% · 선택범위 5.0~9.0% · 0.1% 단위. 선택한 금리는 사업성 판정의 부채상환비율 계산에 직접 적용됩니다.</p>
         <input
           type="range"
           min={MIN_PF_RATE}

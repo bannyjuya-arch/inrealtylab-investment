@@ -110,7 +110,7 @@ export default function Part2Launcher() {
     }
 
     if (!uniquePnus.length) {
-      setMessage("선택된 필지의 PNU를 읽지 못했습니다. 지도에서 필지를 다시 선택해 주세요.");
+      setMessage("선택된 필지를 읽지 못했습니다. 지도에서 필지를 다시 선택해 주세요.");
       return;
     }
 
@@ -150,9 +150,9 @@ export default function Part2Launcher() {
   return (
     <section style={{ maxWidth: 1440, margin: "0 auto 32px", padding: "0 20px" }}>
       <div className="next-step-card">
-        <span>PART 2</span>
+        <span>다음 단계</span>
         <strong>소유 · 사업추진 가능성 분석</strong>
-        <p>현재 선택된 필지의 PNU와 Part 1 개발가능규모를 함께 넘겨 공공소유 여부와 후속 사업검토에 연결합니다.</p>
+        <p>현재 선택된 필지와 개발가능 규모를 함께 넘겨 공공소유 여부와 후속 사업검토로 연결합니다.</p>
         <button type="button" onClick={openControl}>소유 · 사업추진 분석</button>
         {message && <div className="analysis-alert error" style={{ marginTop: 12 }}>{message}</div>}
       </div>
