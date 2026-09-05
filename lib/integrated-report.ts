@@ -6,17 +6,24 @@ export const DEVELOPMENT_SCENARIOS = [
   { key: "POSITIVE", label: "긍정", factor: 1 },
 ] as const;
 
+// 시설 분류의 단일 기준은 Supabase facility_master.facility_code다.
+// 2026-09-05 정리 전에는 세 벌이 따로 돌고 있었다.
+//   STEP 2 ProgramChoice: "C01" (facility_master.category_code)
+//   STEP 3 수요 입력:      "OFFICE"·"RESIDENTIAL"·"MIXED_USE" 등 자체 어휘
+//   임대료·수익정책:        "C01_OFFICE" (facility_master.facility_code)
+// 세 벌이 달라서 STEP 2에서 고른 시설 구성이 STEP 3 계산에 전혀 도달하지 못했다.
+// 여기서는 facility_code 한 벌만 쓴다.
 export const COMMERCIAL_CATEGORIES = [
-  { key: "OFFICE", label: "오피스 (OFFICE)" },
-  { key: "RETAIL", label: "리테일 (RETAIL)" },
-  { key: "LOGISTICS_WAREHOUSE", label: "물류/창고 (LOGISTICS & WAREHOUSE)" },
-  { key: "RESIDENTIAL", label: "주거 (RESIDENTIAL)" },
-  { key: "HOSPITALITY", label: "숙박 (HOSPITALITY)" },
-  { key: "HEALTHCARE", label: "의료/헬스케어 (HEALTHCARE)" },
-  { key: "EDUCATION_RESEARCH", label: "교육/연구 (EDUCATION & RESEARCH)" },
-  { key: "INDUSTRIAL_MANUFACTURING", label: "산업/제조 (INDUSTRIAL & MANUFACTURING)" },
-  { key: "DATA_CENTER", label: "데이터센터 (DATA CENTER)" },
-  { key: "MIXED_USE", label: "복합용도 (MIXED-USE)" },
+  { key: "C01_OFFICE", label: "오피스 (OFFICE)" },
+  { key: "C02_RETAIL", label: "리테일 (RETAIL)" },
+  { key: "C03_HOSPITALITY", label: "호스피탈리티 (HOSPITALITY)" },
+  { key: "C04_LIVING", label: "리빙·임대주택 (LIVING)" },
+  { key: "C05_HEALTHCARE", label: "헬스케어 (HEALTHCARE)" },
+  { key: "C06_EDUCATION", label: "교육 (EDUCATION)" },
+  { key: "C07_CULTURE_ENTERTAINMENT", label: "문화·엔터테인먼트 (CULTURE)" },
+  { key: "C08_RND_LAB", label: "R&D·랩 (R&D / LAB)" },
+  { key: "C09_LOGISTICS", label: "물류 (LOGISTICS)" },
+  { key: "C10_DIGITAL_INFRA", label: "디지털 인프라 (DIGITAL INFRA)" },
 ] as const;
 
 export type CommercialCategoryKey = (typeof COMMERCIAL_CATEGORIES)[number]["key"];
@@ -54,6 +61,7 @@ export type ScenarioCapacity = {
   demandFit: "SHORT" | "EXACT" | "EXCESS" | "REVIEW";
   selectedCommercialGfa: number | null;
   constructionCapex: number | null;
+  trustFee: number | null;
   totalProjectCost: number | null;
 };
 
@@ -100,6 +108,11 @@ export type StructurePolicy = {
   dscrMin: number | null;
   propertyTaxApplies: boolean | null;
   ownershipDuringOperation: string | null;
+  /** 신탁보수 요율(%). 부동산신탁업무보수규정 기준. 신탁 구조가 아니면 null. */
+  trustFeeRatePct?: number | null;
+  /** 그 요율을 무엇에 곱하는지. 지금은 건설비(Construction CAPEX) 기준만 계산한다. */
+  trustFeeBase?: string | null;
+  trustFeeBasis?: string | null;
 };
 
 /** 금융 가정이 어디서 온 값인지. 화면에서 근거를 표시하기 위해 함께 돌려준다. */
@@ -198,13 +211,58 @@ function readLinkedPart1Scenarios(): LinkedPart1Scenario[] {
   }
 }
 
+/** facility_master.category_code("C01")로 저장된 예전 값을 facility_code로 올린다. */
+function normalizeFacilityCode(code: string): string {
+  const legacy: Record<string, string> = {
+    C01: "C01_OFFICE", C02: "C02_RETAIL", C03: "C03_HOSPITALITY", C04: "C04_LIVING",
+    C05: "C05_HEALTHCARE", C06: "C06_EDUCATION", C07: "C07_CULTURE_ENTERTAINMENT",
+    C08: "C08_RND_LAB", C09: "C09_LOGISTICS", C10: "C10_DIGITAL_INFRA",
+  };
+  return legacy[code] ?? code;
+}
+
+/**
+ * STEP 2에서 고른 수익시설 배분을 읽는다.
+ *
+ * 2026-09-05까지 이 함수는 아무도 쓰지 않는 키(inrealtylab.commercialAllocation)를 보고 있었다.
+ * ProgramChoice는 inrealtylab.step2Program에 저장하고 있었기 때문에, 사용자가 STEP 2에서
+ * 무엇을 고르든 STEP 3은 항상 "오피스 100%" 기본값으로 계산했다.
+ * 두 키를 모두 읽고, 시설코드도 한 벌로 맞춘다.
+ */
 function readCommercialAllocation(): CommercialAllocationSnapshot | null {
   if (typeof window === "undefined") return null;
-  try {
+
+  const fromAllocation = () => {
     const raw = window.sessionStorage.getItem("inrealtylab.commercialAllocation");
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CommercialAllocationSnapshot;
-    return parsed && Array.isArray(parsed.facilities) ? parsed : null;
+    if (!parsed || !Array.isArray(parsed.facilities) || !parsed.facilities.length) return null;
+    return {
+      ...parsed,
+      facilities: parsed.facilities.map((item) => ({
+        facilityCode: normalizeFacilityCode(String(item.facilityCode ?? "")),
+        ratioPct: Number(item.ratioPct ?? 0),
+      })),
+    } satisfies CommercialAllocationSnapshot;
+  };
+
+  const fromProgram = () => {
+    const raw = window.sessionStorage.getItem("inrealtylab.step2Program");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { commercial?: Record<string, number> };
+    const entries = Object.entries(parsed?.commercial ?? {}).filter(([, pct]) => Number(pct) > 0);
+    if (!entries.length) return null;
+    return {
+      complete: true,
+      facilities: entries.map(([code, pct]) => ({
+        facilityCode: normalizeFacilityCode(code),
+        ratioPct: Number(pct),
+      })),
+    } satisfies CommercialAllocationSnapshot;
+  };
+
+  try {
+    return fromAllocation() ?? fromProgram();
   } catch {
     return null;
   }
@@ -350,7 +408,7 @@ function buildFacilityOperatingLines(selectedCommercialGfa: number | null) {
     : [{ facilityCode: "C01_OFFICE", ratioPct: 100 }];
 
   return facilities.map((facility): FacilityOperatingLine => {
-    const facilityCode = String(facility.facilityCode ?? "");
+    const facilityCode = normalizeFacilityCode(String(facility.facilityCode ?? ""));
     const ratioPct = Math.max(0, Math.min(100, Number(facility.ratioPct ?? 0)));
     const allocatedGfaSqm = selectedCommercialGfa * ratioPct / 100;
     const policy = FACILITY_REVENUE_POLICY[facilityCode] ?? { efficiency: 1, opexPct: 30, leaseBased: false };
@@ -433,7 +491,18 @@ export function buildIntegratedAnalysis(input: {
     const constructionCapex = totalConstructionGfa === null || costPerSqm === null
       ? null
       : totalConstructionGfa * costPerSqm;
-    const totalProjectCost = constructionCapex === null ? null : constructionCapex * TOTAL_PROJECT_COST_FACTOR;
+
+    // 신탁 구조면 신탁보수를 사업비에 얹는다.
+    // 부동산신탁업무보수규정 별표7 차입형토지신탁 개발보수 = 건설비 × 3/100 이내.
+    // 나머지 보수(분양·성과)는 분양가액 기준이라 임대·운영형 사업에는 적용하지 않는다.
+    const trustFeeRate = input.structure?.trustFeeRatePct ?? null;
+    const trustFee = trustFeeRate === null || constructionCapex === null
+      ? null
+      : constructionCapex * trustFeeRate / 100;
+
+    const totalProjectCost = constructionCapex === null
+      ? null
+      : constructionCapex * TOTAL_PROJECT_COST_FACTOR + (trustFee ?? 0);
 
     return {
       key: scenario.key,
@@ -447,6 +516,7 @@ export function buildIntegratedAnalysis(input: {
       demandFit,
       selectedCommercialGfa,
       constructionCapex,
+      trustFee,
       totalProjectCost,
     };
   });

@@ -103,7 +103,18 @@ type StructurePolicyResponse = {
     propertyTaxApplies: boolean | null;
     ownershipDuringOperation: string | null;
     notes: string | null;
+    trustFeeRatePct: number | null;
+    trustFeeBase: string | null;
+    trustFeeBasis: string | null;
   };
+  trustFee: {
+    ratePct: number;
+    base: string;
+    baseName: string;
+    basis: string;
+    isCeiling: boolean;
+    overridden: boolean;
+  } | null;
   unmodelled: string[];
 };
 
@@ -653,6 +664,9 @@ export default function ReportPage() {
             <tr><td className="left">지하 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.undergroundGfa)}</td>)}</tr>
             <tr><td className="left">총 공사 GFA</td>{analysis.capacities.map((c) => <td key={c.key}>{formatGfa(c.totalConstructionGfa)}</td>)}</tr>
             <tr><td className="left">Construction CAPEX</td>{analysis.capacities.map((c) => <td key={c.key}>{formatWon(c.constructionCapex)}</td>)}</tr>
+            {analysis.capacities.some((c) => c.trustFee !== null) && (
+              <tr><td className="left">신탁보수</td>{analysis.capacities.map((c) => <td key={c.key}>{formatWon(c.trustFee)}</td>)}</tr>
+            )}
           </tbody></table>
           <div className="report-note" style={{ marginTop: 10 }}>
             {basementReference?.ratioPct !== null && basementReference?.ratioPct !== undefined
@@ -839,6 +853,9 @@ export default function ReportPage() {
             <Metric label="구조" value={structurePolicy?.policy.structureName ?? "미선택"} />
             <Metric label="시설 소유" value={structurePolicy?.policy.ownershipDuringOperation ?? "-"} />
             <Metric label="시설분 재산세" value={structurePolicy?.policy.propertyTaxApplies ? "부담" : "없음"} />
+            {structurePolicy?.trustFee && (
+              <Metric label="신탁보수" value={`건설비 × ${structurePolicy.trustFee.ratePct}%`} />
+            )}
           </div>
           <div className="report-card"><h3>판정 기준</h3>
             <Metric label="DSCR 기준" value={`≥ ${analysis.dscrPassMin.toFixed(2)}`} />
@@ -849,6 +866,7 @@ export default function ReportPage() {
         {structurePolicy && (
           <div className="report-source" style={{ marginTop: -6, marginBottom: 12 }}>
             구조 선택 경로 — {structurePolicy.resolved.reason}
+            {structurePolicy.trustFee && <> · 신탁보수 근거 — {structurePolicy.trustFee.basis}</>}
           </div>
         )}
 

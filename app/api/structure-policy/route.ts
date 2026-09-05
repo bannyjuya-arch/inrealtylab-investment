@@ -61,6 +61,22 @@ export function resolveStructureCode(input: {
   return { code: "BTO", reason: "사업방식이 선택되지 않아 BTO 기준으로 계산합니다." };
 }
 
+type TrustFeeRow = {
+  trust_type: string;
+  trust_type_name: string;
+  fee_component: string;
+  base_kind: string;
+  base_kind_name: string;
+  rate_pct: number;
+  is_ceiling: boolean;
+  notes: string | null;
+  statute_ref: string;
+  source_name: string;
+};
+
+/** 신탁보수 요율 상한. 보수규정 제6조가 공공성 등을 이유로 할인을 허용하므로 낮춰 쓸 수 있다. */
+const TRUST_FEE_MAX_PCT = 3;
+
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const resolved = resolveStructureCode({
@@ -103,6 +119,59 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 신탁 구조면 신탁보수를 사업비에 넣는다.
+    // 임대·운영형 사업이라 분양가액 기준 보수(관리형 1.5%, 차입형 분양보수 2%)는 적용할 수 없고,
+    // 건설비 기준인 차입형 개발보수만 계산 가능하다.
+    let trustFee: {
+      ratePct: number;
+      base: string;
+      baseName: string;
+      basis: string;
+      isCeiling: boolean;
+      overridden: boolean;
+      alternatives: Array<{ name: string; component: string; baseName: string; ratePct: number }>;
+    } | null = null;
+
+    if (policy.structure_group === "TRUST") {
+      const feeQuery = new URLSearchParams({
+        select: "trust_type,trust_type_name,fee_component,base_kind,base_kind_name,rate_pct,is_ceiling,notes,statute_ref,source_name",
+        trust_type: "in.(DEVELOPMENT_LAND_TRUST,MANAGED_LAND_TRUST)",
+      });
+      const feeResponse = await fetch(`${url}/rest/v1/part3_trust_fee_schedule?${feeQuery.toString()}`, {
+        cache: "no-store",
+        headers: supabasePublicHeaders({ Accept: "application/json" }),
+      });
+      if (feeResponse.ok) {
+        const rows = (await feeResponse.json()) as TrustFeeRow[];
+        const development = rows.find(
+          (row) => row.trust_type === "DEVELOPMENT_LAND_TRUST" && row.fee_component === "DEVELOPMENT"
+        );
+        if (development) {
+          const requested = Number(params.get("trustFeeRatePct"));
+          const overridden = Number.isFinite(requested) && requested >= 0 && requested <= TRUST_FEE_MAX_PCT;
+          const ratePct = overridden ? requested : Number(development.rate_pct);
+          trustFee = {
+            ratePct,
+            base: development.base_kind,
+            baseName: development.base_kind_name,
+            basis: `${development.source_name} ${development.statute_ref} ${development.trust_type_name} ${
+              development.fee_component === "DEVELOPMENT" ? "개발보수" : development.fee_component
+            } — ${development.base_kind_name} × ${development.rate_pct}%${development.is_ceiling ? " 이내" : ""}`,
+            isCeiling: development.is_ceiling,
+            overridden,
+            alternatives: rows
+              .filter((row) => row !== development)
+              .map((row) => ({
+                name: row.trust_type_name,
+                component: row.fee_component,
+                baseName: row.base_kind_name,
+                ratePct: Number(row.rate_pct),
+              })),
+          };
+        }
+      }
+    }
+
     // 지금 DB로 계산할 수 있는 것과 아직 못 하는 것을 구분해 화면에 그대로 알린다.
     const unmodelled: string[] = [];
     if (policy.property_tax_applies) {
@@ -110,8 +179,8 @@ export async function GET(request: NextRequest) {
         `${policy.structure_name}은 운영기간 중 시설분 재산세를 부담합니다. 시가표준액 기준값이 DB에 없어 현재 현금흐름에는 반영되지 않았습니다.`
       );
     }
-    if (policy.structure_group === "TRUST") {
-      unmodelled.push("신탁보수가 DB에 없어 운영비에 반영되지 않았습니다. 수탁 조건이 정해지면 입력해야 합니다.");
+    if (policy.structure_group === "TRUST" && !trustFee) {
+      unmodelled.push("신탁보수 요율을 불러오지 못해 사업비에 반영되지 않았습니다.");
     }
     if (policy.structure_group === "REIT") {
       unmodelled.push(
@@ -140,7 +209,11 @@ export async function GET(request: NextRequest) {
         propertyTaxApplies: policy.property_tax_applies,
         ownershipDuringOperation: policy.ownership_during_operation,
         notes: policy.notes,
+        trustFeeRatePct: trustFee?.ratePct ?? null,
+        trustFeeBase: trustFee?.base ?? null,
+        trustFeeBasis: trustFee?.basis ?? null,
       },
+      trustFee,
       unmodelled,
       available: rows.map((row) => ({ code: row.structure_code, name: row.structure_name })),
     });
