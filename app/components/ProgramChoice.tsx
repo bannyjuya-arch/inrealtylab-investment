@@ -16,9 +16,12 @@ const LIMITS_KEY = "inrealtylab.step2UseLimits";
 const SNAPSHOT_KEY = "inrealtylab.part1Snapshot";
 const STORAGE_KEY = "inrealtylab.step2Program";
 
+// 2026-09-05 정리: 코드를 facility_master.facility_code 한 벌로 통일했다.
+// 예전에는 여기만 category_code("C01")를 쓰고 임대료·수익정책은 facility_code("C01_OFFICE")를
+// 써서, STEP 2에서 고른 구성이 STEP 3 계산에 연결되지 않았다.
 type CommercialCode =
-  | "C01" | "C02" | "C03" | "C04" | "C05"
-  | "C06" | "C07" | "C08" | "C09" | "C10";
+  | "C01_OFFICE" | "C02_RETAIL" | "C03_HOSPITALITY" | "C04_LIVING" | "C05_HEALTHCARE"
+  | "C06_EDUCATION" | "C07_CULTURE_ENTERTAINMENT" | "C08_RND_LAB" | "C09_LOGISTICS" | "C10_DIGITAL_INFRA";
 
 type PublicCode = "P_R_PARKING" | "P_R_SENIOR_DAYCARE" | "P_R_PUBLIC_RENTAL_HOUSING" | "P_NR_GENERIC" | "P_NR_LIBRARY" | "P_NR_SENIOR_WELFARE_CENTER" | "P_NR_SOCIAL_WELFARE_CENTER" | "P_NR_PARK";
 
@@ -32,16 +35,16 @@ type CommercialFacility = {
 };
 
 const COMMERCIAL: CommercialFacility[] = [
-  { code: "C01", label: "오피스", businessModel: "임대", allowedFrom: ["OFFICE_GENERAL"], priority: 10 },
-  { code: "C02", label: "리테일", businessModel: "임대 · 분양", allowedFrom: ["RETAIL", "NEIGHBORHOOD_1", "NEIGHBORHOOD_2"], priority: 20 },
-  { code: "C03", label: "호스피탈리티", businessModel: "운영", allowedFrom: ["HOSPITALITY"], priority: 30 },
-  { code: "C04", label: "리빙", businessModel: "임대주택", allowedFrom: ["LIVING"], priority: 40 },
-  { code: "C05", label: "헬스케어", businessModel: "운영", allowedFrom: ["MEDICAL"], priority: 50 },
-  { code: "C06", label: "교육", businessModel: "운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 60 },
-  { code: "C07", label: "문화 · 엔터테인먼트", businessModel: "운영", allowedFrom: ["CULTURE_ASSEMBLY", "SPORTS"], priority: 70 },
-  { code: "C08", label: "R&D · 랩", businessModel: "임대 · 운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 80 },
-  { code: "C09", label: "물류", businessModel: "임대 · 운영", allowedFrom: ["LOGISTICS"], priority: 90 },
-  { code: "C10", label: "디지털 인프라", businessModel: "용량 계약", allowedFrom: ["DIGITAL_INFRA"], priority: 100 },
+  { code: "C01_OFFICE", label: "오피스", businessModel: "임대", allowedFrom: ["OFFICE_GENERAL"], priority: 10 },
+  { code: "C02_RETAIL", label: "리테일", businessModel: "임대 · 분양", allowedFrom: ["RETAIL", "NEIGHBORHOOD_1", "NEIGHBORHOOD_2"], priority: 20 },
+  { code: "C03_HOSPITALITY", label: "호스피탈리티", businessModel: "운영", allowedFrom: ["HOSPITALITY"], priority: 30 },
+  { code: "C04_LIVING", label: "리빙", businessModel: "임대주택", allowedFrom: ["LIVING"], priority: 40 },
+  { code: "C05_HEALTHCARE", label: "헬스케어", businessModel: "운영", allowedFrom: ["MEDICAL"], priority: 50 },
+  { code: "C06_EDUCATION", label: "교육", businessModel: "운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 60 },
+  { code: "C07_CULTURE_ENTERTAINMENT", label: "문화 · 엔터테인먼트", businessModel: "운영", allowedFrom: ["CULTURE_ASSEMBLY", "SPORTS"], priority: 70 },
+  { code: "C08_RND_LAB", label: "R&D · 랩", businessModel: "임대 · 운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 80 },
+  { code: "C09_LOGISTICS", label: "물류", businessModel: "임대 · 운영", allowedFrom: ["LOGISTICS"], priority: 90 },
+  { code: "C10_DIGITAL_INFRA", label: "디지털 인프라", businessModel: "용량 계약", allowedFrom: ["DIGITAL_INFRA"], priority: 100 },
 ];
 
 const PUBLIC_FACILITIES: Array<{ code: PublicCode; label: string; revenue: boolean }> = [
@@ -273,10 +276,26 @@ export default function ProgramChoice() {
     if (!selection) return;
     try {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
+
+      // STEP 3 엔진이 읽는 형태로도 같이 남긴다.
+      // 이 다리가 없어서 지금까지 STEP 2 선택이 사업성 계산에 반영되지 않았다.
+      const facilities = Object.entries(selection.commercial)
+        .filter(([, pct]) => Number(pct) > 0)
+        .map(([facilityCode, ratioPct]) => ({ facilityCode, ratioPct: Number(ratioPct) }));
+      const total = facilities.reduce((sum, item) => sum + item.ratioPct, 0);
+      sessionStorage.setItem(
+        "inrealtylab.commercialAllocation",
+        JSON.stringify({
+          // 합계가 100%에 닿아야 배분이 확정된 것으로 본다(반올림 오차 0.5%p 허용).
+          complete: facilities.length > 0 && Math.abs(total - 100) <= 0.5,
+          commercialPoolGfaSqm: commercialGfa,
+          facilities,
+        })
+      );
     } catch {
       // 스토리지를 못 쓰면 STEP 3에서 기본 배분으로 계산한다.
     }
-  }, [selection]);
+  }, [selection, commercialGfa]);
 
 
 
