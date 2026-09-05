@@ -269,6 +269,16 @@ function irrText(value: number | null) {
 /**
  * 사용자 화면에 보이는 판정 표기. 내부 코드값(PASS·REVIEW…)은 관리자·DB 쪽에만 남긴다.
  */
+/** 적용 임대료 묶음의 기준일. 시설별 공표일이 다르면 가장 오래된 날짜가 전체의 기준일이 된다. */
+function rentAsOfDate(rent: RentResolverResponse | null): string {
+  if (!rent) return "";
+  const dates = rent.facilities
+    .map((item) => item.baseDate)
+    .filter((item): item is string => Boolean(item));
+  if (!dates.length) return rent.retail?.baseDate ?? "";
+  return dates.reduce((oldest, item) => (item < oldest ? item : oldest));
+}
+
 /** 서브마켓 코드는 리서치 용어라 화면에는 한글 권역명으로 바꿔 보여준다. */
 const REGION_LABEL: Record<string, string> = {
   CBD: "도심권역", GBD: "강남권역", YBD: "여의도권역",
@@ -788,7 +798,7 @@ export default function ReportPage() {
         <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
           <div className="report-demand-grid"><Field label="공공시설 필요면적 ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
         </div>
-        <div className="report-section"><div className="report-section-head"><div><span>임대료</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{rent?.retail?.baseDate ?? ""}</span></div>
+        <div className="report-section"><div className="report-section-head"><div><span>임대료</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{rentAsOfDate(rent) ? `기준일 ${rentAsOfDate(rent)}` : ""}</span></div>
           <div className="report-form-grid no-print admin-only">
             <div className="report-field">
               <label>상가 유형</label>
@@ -834,9 +844,8 @@ export default function ReportPage() {
                     <td className="left">{facilityLabel(facility.facilityCode)}</td>
                     <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
                     <td>{regionLabel(facility.geography)}</td>
-                    <td className="left" title={facility.source ?? undefined}>
+                    <td className="left" title={`${facility.source ?? "-"}${facility.baseDate ? ` (${facility.baseDate})` : ""}`}>
                       {INTERNAL_SOURCE_LABEL}
-                      {facility.baseDate ? ` (${facility.baseDate})` : ""}
                     </td>
                   </tr>
                 ))}
