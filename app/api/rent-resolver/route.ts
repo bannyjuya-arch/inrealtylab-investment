@@ -16,6 +16,24 @@ import { supabasePublicConfig, supabasePublicHeaders } from "../lib/supabase-pub
 
 export const dynamic = "force-dynamic";
 
+/** 화면에 시설 코드를 노출하지 않기 위한 이름표. 코드는 DB 조인용이다. */
+const FACILITY_LABEL: Record<string, string> = {
+  C01_OFFICE: "오피스",
+  C02_RETAIL: "리테일",
+  C03_HOSPITALITY: "호스피탈리티",
+  C04_LIVING: "임대주택",
+  C05_HEALTHCARE: "실버하우스·헬스케어",
+  C06_EDUCATION: "교육",
+  C07_CULTURE_ENTERTAINMENT: "문화·엔터테인먼트",
+  C08_RND_LAB: "R&D·랩",
+  C09_LOGISTICS: "물류",
+  C10_DIGITAL_INFRA: "디지털 인프라",
+};
+const label = (code: string) => FACILITY_LABEL[code] ?? code;
+
+/** 관측치가 아니라 우리가 정한 기준으로 만든 값의 출처 표기. */
+const INTERNAL_SOURCE_LABEL = "인리얼티 내부 DB 분석 기준";
+
 type FloorRatioRow = {
   property_subtype: string;
   geography_name: string;
@@ -630,7 +648,7 @@ export async function GET(request: NextRequest) {
             geography: base.geography,
             sampleCount: 0,
             baseDate: base.baseDate,
-            source: `${rule.base_facility_code}의 ${ratio}% (인리얼티 내부 기준)`,
+            source: `${label(rule.base_facility_code)} 임대료의 ${ratio}% · ${INTERNAL_SOURCE_LABEL}`,
             originTable: "part3_rent_derivation_rule",
             matchedSubmarket: base.matchedSubmarket,
             alternatives: [],

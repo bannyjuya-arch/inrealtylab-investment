@@ -14,17 +14,29 @@ export const DEVELOPMENT_SCENARIOS = [
 // 세 벌이 달라서 STEP 2에서 고른 시설 구성이 STEP 3 계산에 전혀 도달하지 못했다.
 // 여기서는 facility_code 한 벌만 쓴다.
 export const COMMERCIAL_CATEGORIES = [
-  { key: "C01_OFFICE", label: "오피스 (OFFICE)" },
-  { key: "C02_RETAIL", label: "리테일 (RETAIL)" },
-  { key: "C03_HOSPITALITY", label: "호스피탈리티 (HOSPITALITY)" },
-  { key: "C04_LIVING", label: "리빙·임대주택 (LIVING)" },
-  { key: "C05_HEALTHCARE", label: "헬스케어 (HEALTHCARE)" },
-  { key: "C06_EDUCATION", label: "교육 (EDUCATION)" },
-  { key: "C07_CULTURE_ENTERTAINMENT", label: "문화·엔터테인먼트 (CULTURE)" },
-  { key: "C08_RND_LAB", label: "R&D·랩 (R&D / LAB)" },
-  { key: "C09_LOGISTICS", label: "물류 (LOGISTICS)" },
-  { key: "C10_DIGITAL_INFRA", label: "디지털 인프라 (DIGITAL INFRA)" },
+  { key: "C01_OFFICE", label: "오피스" },
+  { key: "C02_RETAIL", label: "리테일" },
+  { key: "C03_HOSPITALITY", label: "호스피탈리티" },
+  { key: "C04_LIVING", label: "임대주택" },
+  { key: "C05_HEALTHCARE", label: "실버하우스·헬스케어" },
+  { key: "C06_EDUCATION", label: "교육" },
+  { key: "C07_CULTURE_ENTERTAINMENT", label: "문화·엔터테인먼트" },
+  { key: "C08_RND_LAB", label: "R&D·랩" },
+  { key: "C09_LOGISTICS", label: "물류" },
+  { key: "C10_DIGITAL_INFRA", label: "디지털 인프라" },
 ] as const;
+
+/** 화면에는 시설 코드를 노출하지 않는다. 코드는 DB 조인용이고 사람이 읽는 건 이름이다. */
+export const FACILITY_LABEL: Record<string, string> = Object.fromEntries(
+  COMMERCIAL_CATEGORIES.map((item) => [item.key, item.label])
+);
+
+export function facilityLabel(code: string) {
+  return FACILITY_LABEL[code] ?? code;
+}
+
+/** 관측치가 아니라 우리가 정한 기준으로 만든 값의 출처 표기. */
+export const INTERNAL_SOURCE_LABEL = "인리얼티 내부 DB 분석 기준";
 
 export type CommercialCategoryKey = (typeof COMMERCIAL_CATEGORIES)[number]["key"];
 export type DevelopmentScenarioKey = (typeof DEVELOPMENT_SCENARIOS)[number]["key"];
@@ -84,6 +96,8 @@ export type FinancialCell = {
   annualLandFee: number | null;
   annualRevenue: number | null;
   annualOpex: number | null;
+  annualPropertyTax: number | null;
+  annualCorporateTax: number | null;
   annualProjectCashflow: number | null;
   debtAmount: number | null;
   annualDebtService: number | null;
@@ -113,7 +127,24 @@ export type StructurePolicy = {
   /** 그 요율을 무엇에 곱하는지. 지금은 건설비(Construction CAPEX) 기준만 계산한다. */
   trustFeeBase?: string | null;
   trustFeeBasis?: string | null;
+  /** 리츠 배당소득공제 등으로 법인 단계 과세가 없는 구조인지. */
+  corporateTaxExempt?: boolean | null;
 };
+
+export type TaxBracket = { upperKrw: number | null; ratePct: number; deductionKrw: number };
+
+/**
+ * 누진세율표로 산출세액을 구한다. 과세표준 × 세율 − 누진공제.
+ * 구간은 상한 오름차순이며 마지막 구간의 상한은 null(초과)이다.
+ */
+export function progressiveTax(taxBase: number, brackets: TaxBracket[]): number {
+  if (taxBase <= 0 || !brackets.length) return 0;
+  const sorted = [...brackets].sort(
+    (a, b) => (a.upperKrw ?? Number.POSITIVE_INFINITY) - (b.upperKrw ?? Number.POSITIVE_INFINITY)
+  );
+  const band = sorted.find((item) => item.upperKrw === null || taxBase <= item.upperKrw) ?? sorted[sorted.length - 1];
+  return Math.max(0, taxBase * band.ratePct / 100 - band.deductionKrw);
+}
 
 /** 금융 가정이 어디서 온 값인지. 화면에서 근거를 표시하기 위해 함께 돌려준다. */
 export type AssumptionBasis = "USER" | "BENCHMARK" | "FALLBACK";
@@ -440,6 +471,14 @@ export function buildIntegratedAnalysis(input: {
   assumptions: FinancialAssumptions;
   /** STEP 2에서 고른 사업구조. 없으면 예전처럼 공통 기준으로 계산한다. */
   structure?: StructurePolicy | null;
+  /**
+   * 건물분 재산세 단가(원/㎡·년). /api/property-tax가 계산해 넘긴다.
+   * 시설을 민간이 소유하는 구조(대부·사용허가, 신탁)에서만 값이 들어온다.
+   */
+  propertyTaxPerSqmYear?: number | null;
+  /** 법인세·법인지방소득세 누진세율표. /api/structure-policy가 넘긴다. */
+  corporateTaxBrackets?: TaxBracket[] | null;
+  localIncomeTaxBrackets?: TaxBracket[] | null;
 }): IntegratedAnalysis {
   const siteArea = nonNegative(input.siteAreaSqm);
   const farMax = nonNegative(input.farMaxPct);
@@ -569,9 +608,33 @@ export function buildIntegratedAnalysis(input: {
         ? null
         : annualRevenue * (legacyOpexPct / 100);
 
-    const annualProjectCashflow = annualRevenue === null || annualOpex === null || annualLandFee === null
+    // 건물분 재산세는 매년 나가는 보유세다. 운영비와 별도로 잡아 화면에서 구분해 보여준다.
+    const propertyTaxRate = input.propertyTaxPerSqmYear ?? null;
+    const annualPropertyTax = propertyTaxRate === null || capacity.totalConstructionGfa === null
       ? null
-      : annualRevenue - annualOpex - annualLandFee;
+      : capacity.totalConstructionGfa * propertyTaxRate;
+
+    const cashflowBeforeTax = annualRevenue === null || annualOpex === null || annualLandFee === null
+      ? null
+      : annualRevenue - annualOpex - annualLandFee - (annualPropertyTax ?? 0);
+
+    // 법인세 + 법인지방소득세. 누진세율표로 구간별 세율과 누진공제를 적용한다.
+    // 감가상각과 이자 손금을 반영하지 않은 보수적 근사이며 그 사실을 화면에 적는다.
+    // 리츠는 배당소득공제로 면세라 이 단계를 건너뛴다.
+    const taxExempt = input.structure?.corporateTaxExempt === true;
+    const brackets = input.corporateTaxBrackets ?? null;
+    const localBrackets = input.localIncomeTaxBrackets ?? null;
+    const annualCorporateTax =
+      taxExempt
+        ? 0
+        : brackets === null || cashflowBeforeTax === null
+          ? null
+          : progressiveTax(Math.max(0, cashflowBeforeTax), brackets) +
+            (localBrackets ? progressiveTax(Math.max(0, cashflowBeforeTax), localBrackets) : 0);
+
+    const annualProjectCashflow = cashflowBeforeTax === null
+      ? null
+      : cashflowBeforeTax - (annualCorporateTax ?? 0);
 
     const debtAmount = capacity.totalProjectCost === null
       ? null
@@ -602,6 +665,8 @@ export function buildIntegratedAnalysis(input: {
       annualLandFee,
       annualRevenue,
       annualOpex,
+      annualPropertyTax,
+      annualCorporateTax,
       annualProjectCashflow,
       debtAmount,
       annualDebtService,

@@ -119,6 +119,56 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 법인세 — 누진세율표(법인세법 §55)와 법인지방소득세(지방세법 §103의20)를 함께 내려보낸다.
+    // 리츠는 배당소득공제로 면세라 세율표 대신 면세 플래그로 처리한다.
+    let corporateTax: {
+      exempt: boolean;
+      basis: string;
+      statuteRef: string | null;
+      brackets: Array<{ upperKrw: number | null; ratePct: number; deductionKrw: number }>;
+      localBrackets: Array<{ upperKrw: number | null; ratePct: number; deductionKrw: number }>;
+    } | null = null;
+    try {
+      const [ruleResponse, bracketResponse] = await Promise.all([
+        fetch(
+          `${url}/rest/v1/part3_corporate_tax_rule?select=structure_group,is_exempt,basis,statute_ref&structure_group=eq.${policy.structure_group}`,
+          { cache: "no-store", headers: supabasePublicHeaders({ Accept: "application/json" }) }
+        ),
+        fetch(
+          `${url}/rest/v1/part3_corporate_tax_bracket?select=entity_kind,upper_krw,rate_pct,progressive_deduction_krw&base_year=eq.2026&entity_kind=in.(FOR_PROFIT,LOCAL_INCOME)`,
+          { cache: "no-store", headers: supabasePublicHeaders({ Accept: "application/json" }) }
+        ),
+      ]);
+      if (ruleResponse.ok && bracketResponse.ok) {
+        const rules = (await ruleResponse.json()) as Array<{
+          is_exempt: boolean; basis: string; statute_ref: string | null;
+        }>;
+        const brackets = (await bracketResponse.json()) as Array<{
+          entity_kind: string; upper_krw: number | null; rate_pct: number; progressive_deduction_krw: number;
+        }>;
+        const toBracket = (kind: string) =>
+          brackets
+            .filter((row) => row.entity_kind === kind)
+            .map((row) => ({
+              upperKrw: row.upper_krw === null ? null : Number(row.upper_krw),
+              ratePct: Number(row.rate_pct),
+              deductionKrw: Number(row.progressive_deduction_krw),
+            }))
+            .sort((a, b) => (a.upperKrw ?? Number.POSITIVE_INFINITY) - (b.upperKrw ?? Number.POSITIVE_INFINITY));
+        if (rules.length) {
+          corporateTax = {
+            exempt: Boolean(rules[0].is_exempt),
+            basis: rules[0].basis,
+            statuteRef: rules[0].statute_ref,
+            brackets: toBracket("FOR_PROFIT"),
+            localBrackets: toBracket("LOCAL_INCOME"),
+          };
+        }
+      }
+    } catch {
+      // 법인세 규칙을 못 읽으면 세전 기준으로 계산하고 화면에 미반영으로 남긴다.
+    }
+
     // 신탁 구조면 신탁보수를 사업비에 넣는다.
     // 임대·운영형 사업이라 분양가액 기준 보수(관리형 1.5%, 차입형 분양보수 2%)는 적용할 수 없고,
     // 건설비 기준인 차입형 개발보수만 계산 가능하다.
@@ -184,10 +234,8 @@ export async function GET(request: NextRequest) {
     if (policy.structure_group === "TRUST" && !trustFee) {
       unmodelled.push("신탁보수 요율을 불러오지 못해 사업비에 반영되지 않았습니다.");
     }
-    if (policy.structure_group === "REIT") {
-      unmodelled.push(
-        "리츠는 배당가능이익의 90% 이상을 배당하면 그 배당금액을 소득공제받습니다(법인세법 제51조의2). 법인세 계산 자체가 아직 없어 이 효과는 반영되지 않았습니다."
-      );
+    if (!corporateTax) {
+      unmodelled.push("법인세 실효세율을 불러오지 못해 세전 기준으로 계산했습니다.");
     }
     if (policy.uses_exit_cap_rate) {
       unmodelled.push(
@@ -230,9 +278,11 @@ export async function GET(request: NextRequest) {
         trustFeeRatePct: trustFee?.ratePct ?? null,
         trustFeeBase: trustFee?.base ?? null,
         trustFeeBasis: trustFee?.basis ?? null,
+        corporateTaxExempt: corporateTax?.exempt ?? null,
       },
       trustFee,
       taxNotes,
+      corporateTax,
       unmodelled,
       available: rows.map((row) => ({ code: row.structure_code, name: row.structure_name })),
     });
