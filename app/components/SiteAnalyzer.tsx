@@ -312,6 +312,10 @@ export default function SiteAnalyzer() {
           pnus: parcels.map((parcel) => parcel.pnu),
           siteAreaSqm: totalArea,
           center: getRawFeatureCenter(parcels[0].feature),
+          // 2026-09-05: 보고서 1면이 지도를 직접 그릴 수 있도록 필지 도형을 함께 넘긴다.
+          // 예전에는 STEP 1 캔버스를 JPEG로 캡처해 들고 갔는데, 그 버튼을 안 거치고
+          // 보고서로 들어오면 지도가 통째로 비었다.
+          features: parcels.map((parcel) => parcel.feature),
         })
       );
     } catch {

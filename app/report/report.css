@@ -109,6 +109,16 @@
 }
 .report-map-placeholder strong { display: block; color: #26292B; margin-bottom: 7px; }
 
+/* 2026-09-05: 보고서가 직접 그리는 지도. 자리표시자와 같은 크기를 쓴다. */
+.report-map { position: relative; min-height: 260px; border-radius: 10px; overflow: hidden; border: 1px solid #C3CCC7; background: #F6F8F7; }
+.report-map-canvas { position: absolute; inset: 0; }
+.report-map-canvas canvas { border-radius: 10px; }
+.report-map-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #9DA09E; }
+/* 인쇄 시 브라우저가 배경·타일을 빼버리지 않게 한다. */
+.report-map, .report-map-canvas, .report-map-canvas canvas {
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+
 .report-owner-list { display: grid; gap: 9px; }
 .report-owner-row { padding: 12px 14px; border: 1px solid #E4E8E6; border-radius: 8px; }
 .report-owner-row strong { display: block; margin-bottom: 4px; color: #26292B; }
@@ -150,7 +160,8 @@
   .report-form-grid, .report-demand-grid { gap: 6px; }
   .report-field input, .report-field select { padding: 6px 7px; font-size: 10.5px; }
   /* 인쇄에서는 지도 자리를 줄여 1면에 표가 하나 더 들어가게 합니다. */
-  .report-map-placeholder { min-height: 150px; }
+  .report-map-placeholder, .report-map { min-height: 150px; }
+  .report-map-loading { display: none; }
   .report-grid { gap: 12px; }
   .report-verdict { padding: 13px 16px; }
   .report-verdict strong { font-size: 21px; margin-bottom: 6px; }

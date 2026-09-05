@@ -16,6 +16,7 @@ import {
   type FinancialAssumptions,
 } from "../../lib/integrated-report";
 import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
+import ReportMap from "./report-map";
 import "./report.css";
 
 type Part1Snapshot = {
@@ -752,7 +753,7 @@ export default function ReportPage() {
         <h1 className="report-title">{address} 사업추진 약식검토</h1>
         <p className="report-subtitle">위치·대지현황 · 소유와 협의대상 · 법적 개발가능 규모</p>
         <div className="report-grid">
-          <div className="report-map-placeholder"><div><strong>선택 필지 지도영역</strong><span>선택 필지 {parcelCount || "-"}개</span></div></div>
+          <ReportMap parcelCount={parcelCount} />
           <div className="report-card"><h3>대지 개요</h3>
             <Metric label="대지면적" value={formatGfa(siteAreaSqm)} />
             <Metric label="용도지역" value={snapshot.primaryZone ?? "확인 필요"} />
