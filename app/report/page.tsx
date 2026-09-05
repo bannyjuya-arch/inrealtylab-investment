@@ -269,6 +269,25 @@ function irrText(value: number | null) {
 /**
  * 사용자 화면에 보이는 판정 표기. 내부 코드값(PASS·REVIEW…)은 관리자·DB 쪽에만 남긴다.
  */
+/** 서브마켓 코드는 리서치 용어라 화면에는 한글 권역명으로 바꿔 보여준다. */
+const REGION_LABEL: Record<string, string> = {
+  CBD: "도심권역", GBD: "강남권역", YBD: "여의도권역",
+  Others: "서울 기타권역", Pangyo: "판교", Bundang: "분당",
+  "Capital Area": "수도권", SEOUL_TOTAL: "서울 전체", NATION: "전국",
+};
+function regionLabel(value: string | null | undefined) {
+  if (!value) return "-";
+  return REGION_LABEL[value] ?? value;
+}
+
+/** 운영기간 중 시설 소유주체. DB 코드값을 그대로 보여주지 않는다. */
+function ownershipLabel(value: string | null | undefined) {
+  const map: Record<string, string> = {
+    PUBLIC: "공공", PRIVATE: "민간", TRUSTEE: "신탁사", SPC: "사업시행법인", REIT: "리츠",
+  };
+  return value ? map[value] ?? value : "-";
+}
+
 function statusLabel(value: string) {
   const map: Record<string, string> = {
     PASS: "가능", STRONG: "우수", ELIGIBLE: "가능",
@@ -667,7 +686,7 @@ export default function ReportPage() {
     : ownershipGate !== "PASS"
       ? { status: "REVIEW", title: "소유·협의구조 확인 필요", text: "공공소유 및 재산관리·의사결정권자 확인 후 후속 판단이 가능합니다." }
       : analysis.fullDemandGfa === null
-        ? { status: "REVIEW", title: "수요 DB 연결 필요", text: "PUBLIC Required GFA와 COMMERCIAL Supportable GFA가 채워지면 면적 적합성을 판정합니다." }
+        ? { status: "REVIEW", title: "수요 DB 연결 필요", text: "공공시설과 수익시설의 필요 연면적이 채워지면 면적 적합성을 판정합니다." }
         : recommendation
           ? recommendation.overallEligibility === "ELIGIBLE"
             ? { status: "PASS", title: "사업추진 검토 가능", text: `${recommendation.scenarioLabel} 개발안 / ${recommendation.term}년 조합이 수요 적합성과 목표수익률·DSCR 기준을 모두 충족합니다.` }
@@ -701,10 +720,10 @@ export default function ReportPage() {
   return (
     <main className={`report-shell${isAdmin ? " is-admin" : ""}`}>
       <div className="report-toolbar no-print">
-        <div><strong>INRealtyLab · Integrated Executive Review</strong><div className="report-source">Part 1 → Part 2 → Part 3{isAdmin ? " · 관리자 모드" : ""}</div></div>
+        <div><strong>인리얼티 통합 검토보고서</strong><div className="report-source">현황분석 → 시설구성 → 사업성 판정{isAdmin ? " · 관리자 모드" : ""}</div></div>
         <div className="report-toolbar-actions">
           <button className="report-btn" onClick={() => window.history.back()}>이전</button>
-          <button className="report-btn primary" onClick={() => window.print()}>3장 보고서 인쇄 / PDF</button>
+          <button className="report-btn primary" onClick={() => window.print()}>인쇄 / PDF</button>
           {authReady && (isAdmin
             ? <button className="report-btn" onClick={handleAdminLogout}>로그아웃</button>
             : <button
@@ -723,7 +742,7 @@ export default function ReportPage() {
         <h1 className="report-title">{address} 사업추진 약식검토</h1>
         <p className="report-subtitle">위치·대지현황 · 소유와 협의대상 · 법적 개발가능 규모</p>
         <div className="report-grid">
-          <div className="report-map-placeholder"><div><strong>선택 필지 지도영역</strong><span>Part 1 선택필지 {parcelCount || "-"}개 · PNU 기반 연계</span></div></div>
+          <div className="report-map-placeholder"><div><strong>선택 필지 지도영역</strong><span>선택 필지 {parcelCount || "-"}개</span></div></div>
           <div className="report-card"><h3>대지 개요</h3>
             <Metric label="대지면적" value={formatGfa(siteAreaSqm)} />
             <Metric label="용도지역" value={snapshot.primaryZone ?? "확인 필요"} />
@@ -755,7 +774,7 @@ export default function ReportPage() {
           </tbody></table>
           <div className="report-note" style={{ marginTop: 10 }}>
             {basementReference?.ratioPct !== null && basementReference?.ratioPct !== undefined
-              ? `지하 GFA는 건축HUB 층별개요의 기존 건축물 참고비율 ${basementReference.ratioPct.toFixed(1)}%를 초기값으로 적용했습니다. 미래 계획 지하규모의 확정값이 아니며 직접 수정할 수 있습니다.`
+              ? `지하 연면적은 건축HUB 층별개요의 기존 건축물 참고비율 ${basementReference.ratioPct.toFixed(1)}%를 초기값으로 적용했습니다. 미래 계획 지하규모의 확정값이 아니며 직접 수정할 수 있습니다.`
               : "건축HUB에서 유효한 지상·지하 층별 면적을 찾지 못해 지하 비율은 자동 추정하지 않았습니다."}
           </div>
         </div>
@@ -767,7 +786,7 @@ export default function ReportPage() {
         <h2 className="report-title">수요시설과 적용 임대료</h2>
         <p className="report-subtitle">시설별 수요면적 · 위치에 맞춘 임대료 근거 · 개발규모별 공사비</p>
         <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
-          <div className="report-demand-grid"><Field label="PUBLIC Required GFA ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
+          <div className="report-demand-grid"><Field label="공공시설 필요면적 ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
         </div>
         <div className="report-section"><div className="report-section-head"><div><span>임대료</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{rent?.retail?.baseDate ?? ""}</span></div>
           <div className="report-form-grid no-print admin-only">
@@ -814,7 +833,7 @@ export default function ReportPage() {
                   <tr key={facility.facilityCode}>
                     <td className="left">{facilityLabel(facility.facilityCode)}</td>
                     <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
-                    <td>{facility.geography}</td>
+                    <td>{regionLabel(facility.geography)}</td>
                     <td className="left">
                       {facility.rentKind === "DERIVED" || !facility.source
                         ? INTERNAL_SOURCE_LABEL
@@ -949,7 +968,7 @@ export default function ReportPage() {
           </div>
           <div className="report-card"><h3>사업구조</h3>
             <Metric label="구조" value={structurePolicy?.policy.structureName ?? "미선택"} />
-            <Metric label="시설 소유" value={structurePolicy?.policy.ownershipDuringOperation ?? "-"} />
+            <Metric label="시설 소유" value={ownershipLabel(structurePolicy?.policy.ownershipDuringOperation)} />
             <Metric label="시설분 재산세" value={structurePolicy?.policy.propertyTaxApplies ? "부담" : "없음"} />
             {structurePolicy?.trustFee && (
               <Metric label="신탁보수" value={`건설비 × ${structurePolicy.trustFee.ratePct}%`} />
@@ -1012,7 +1031,7 @@ export default function ReportPage() {
           </div>
         )}
         <div className="report-section report-verdict"><span className={`report-status ${statusTone(finalDecision.status)}`}>{statusLabel(finalDecision.status)}</span><strong>{finalDecision.title}</strong><p>{finalDecision.text}</p>{recommendation && <p><b>우선 검토:</b> {recommendation.scenarioLabel} / {recommendation.term}년 · 부채상환비율 {statusLabel(recommendation.btoBotStatus)} · 사업수익률 {statusLabel(recommendation.reitsStatus)}</p>}</div>
-        <div className="report-source" style={{ marginTop: 12 }}>실제 PF 가능 여부는 개별 금융기관 약정과 Debt sizing으로 확정합니다. REITs 6.5%는 INRealtyLab 내부 Project IRR 판정기준이며, DSCR·IRR 중 하나라도 CONDITIONAL/FAIL이면 종합판정도 그에 따릅니다.</div>
+        <div className="report-source" style={{ marginTop: 12 }}>실제 자금조달 가능 여부는 개별 금융기관 약정으로 확정됩니다. 사업수익률 기준 6.5%는 인리얼티 내부 판정기준이며, 부채상환비율과 사업수익률 중 하나라도 조건부·불가이면 종합판정도 그에 따릅니다.</div>
         <div className="report-page-number">3 / 3</div>
       </section>
     </main>

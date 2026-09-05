@@ -2,21 +2,17 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { COMMERCIAL_CATEGORIES } from "@/lib/integrated-report";
 
-const BUSINESS_FACILITIES = [
-  { key: "OFFICE", code: "C01_OFFICE", label: "OFFICE" },
-  { key: "RETAIL", code: "C02_RETAIL", label: "RETAIL" },
-  { key: "HOSPITALITY", code: "C03_HOSPITALITY", label: "HOSPITALITY" },
-  { key: "LIVING", code: "C04_LIVING", label: "LIVING" },
-  { key: "HEALTHCARE", code: "C05_HEALTHCARE", label: "HEALTHCARE" },
-  { key: "EDUCATION", code: "C06_EDUCATION", label: "EDUCATION" },
-  { key: "CULTURE_ENTERTAINMENT", code: "C07_CULTURE_ENTERTAINMENT", label: "CULTURE & ENTERTAINMENT" },
-  { key: "RND_LAB", code: "C08_RND_LAB", label: "R&D / LAB" },
-  { key: "LOGISTICS", code: "C09_LOGISTICS", label: "LOGISTICS" },
-  { key: "DIGITAL_INFRA", code: "C10_DIGITAL_INFRA", label: "DIGITAL INFRA" },
-] as const;
+// 2026-09-05: 시설 목록을 여기서 또 하드코딩하지 않는다. 이름·코드는 COMMERCIAL_CATEGORIES 한 곳에서만 온다.
+// (그전에는 이 파일이 OFFICE / CULTURE & ENTERTAINMENT 같은 영문 라벨을 따로 들고 있었다.)
+const BUSINESS_FACILITIES = COMMERCIAL_CATEGORIES.map((item) => ({
+  key: item.key,
+  code: item.key,
+  label: item.label,
+}));
 
-type FacilityKey = (typeof BUSINESS_FACILITIES)[number]["key"];
+type FacilityKey = string;
 
 type CostResponse = {
   ok: boolean;
@@ -107,9 +103,9 @@ export default function BusinessFacilityCostBridge() {
     if (mount && !selected) {
       // 2026-08-26 확정: 시설 선택 카드를 관리자 전용(admin-only)으로 숨기면서 외부 사용자는
       // 시설을 고를 방법이 사라져 공사비·DSCR·IRR이 전부 REVIEW/빈 값으로 나오는 문제가 생겼다.
-      // 시범검토 기본 시설(OFFICE)을 자동 선택해 기본 계산이 항상 돌아가게 하고,
+      // 시범검토 기본 시설(오피스)을 자동 선택해 기본 계산이 항상 돌아가게 하고,
       // 관리자는 로그인 후 화면에 다시 나타나는 버튼으로 다른 시설을 직접 골라 바꿀 수 있다.
-      void selectFacility("OFFICE");
+      void selectFacility("C01_OFFICE");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mount]);
@@ -180,7 +176,7 @@ export default function BusinessFacilityCostBridge() {
         <div><span>BUSINESS FACILITY</span><br /><strong>사업시설 선택 · 공사비 연계</strong></div>
       </div>
       <div className="report-note" style={{ marginBottom: 12 }}>
-        선택한 사업시설의 공사비를 DB에서 조회합니다. 현재 샘플에서는 OFFICE만 공사비가 연결되며 나머지 9개 시설은 단가와 Construction CAPEX를 null로 유지합니다.
+        선택한 사업시설의 공사비를 DB에서 조회합니다. 공사비 자료가 없는 시설은 단가와 공사비를 비워 둡니다 — 임의의 값으로 채우지 않습니다.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
         {BUSINESS_FACILITIES.map((facility) => (
@@ -211,11 +207,11 @@ export default function BusinessFacilityCostBridge() {
                 DB {cost.facilityCode ?? "-"} · 기준일 {cost.effectiveDate ?? "-"} · {cost.sourceCode ?? "출처 확인 필요"}
               </div>
             )}
-            {selected !== "OFFICE" && (
+            {cost?.costPerSqm === null || cost?.costPerSqm === undefined ? (
               <div className="report-warning" style={{ marginTop: 8 }}>
-                현재 이 시설은 연결된 공사비 자료가 없어 단가와 Construction CAPEX를 null로 유지합니다.
+                현재 이 시설은 연결된 공사비 자료가 없어 단가와 공사비를 비워 둡니다.
               </div>
-            )}
+            ) : null}
           </>
         )}
       </div>

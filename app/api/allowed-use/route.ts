@@ -44,6 +44,7 @@ type FacilityRow = {
   facility_key: string;
   facility_label: string;
   facility_group: string;
+  facility_codes: string[] | null;
   display_order: number;
 };
 
@@ -59,6 +60,16 @@ type DistanceRow = {
   review_distance_m: number | null;
   condition_note: string | null;
   statute_ref: string;
+};
+
+type OrdinanceLimitRow = {
+  max_bcr_pct: number | null;
+  max_far_pct: number | null;
+  max_far_pct_special: number | null;
+  special_scope: string | null;
+  statute_ref: string;
+  condition_note: string | null;
+  base_date: string | null;
 };
 
 type Decision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
@@ -109,6 +120,7 @@ export async function GET(request: NextRequest) {
   const pnu = params.get("pnu")?.trim() ?? "";
   const zoneName = params.get("zoneName")?.trim() ?? "";
   const gfaParam = params.get("aboveGroundGfaSqm")?.trim() ?? "";
+  const siteAreaParam = params.get("siteAreaSqm")?.trim() ?? "";
 
   if (!/^\d{19}$/.test(pnu)) {
     return NextResponse.json({ ok: false, message: "19자리 PNU가 필요합니다." }, { status: 400 });
@@ -120,14 +132,15 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const requestedGfa = gfaParam ? Number(gfaParam) : null;
+  let requestedGfa = gfaParam ? Number(gfaParam) : null;
+  const siteAreaSqm = siteAreaParam ? Number(siteAreaParam) : null;
   const isSeoul = pnu.startsWith(SEOUL_PNU_PREFIX);
 
   try {
     const [zones, facilities] = await Promise.all([
       selectRows<ZoneRow>("part1_zone_ucode_reference?select=ucode,zone_name_kr,zone_kind"),
       selectRows<FacilityRow>(
-        "part1_facility_catalog?select=facility_key,facility_label,facility_group,display_order&is_active=eq.true&order=display_order.asc"
+        "part1_facility_catalog?select=facility_key,facility_label,facility_group,facility_codes,display_order&is_active=eq.true&order=display_order.asc"
       ),
     ]);
 
@@ -147,7 +160,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const [rows, caveats, distances] = await Promise.all([
+    const [rows, caveats, distances, limitRows] = await Promise.all([
       selectRows<PermissionRow>(
         `zoning_use_permission?select=statute_ref,clause,item_no,building_use_name,permission,condition_note,condition_max_gfa_sqm,facility_key,list_type,scope,jurisdiction,base_date&ucode=eq.${zone.ucode}`
       ),
@@ -156,6 +169,10 @@ export async function GET(request: NextRequest) {
       ),
       selectRows<DistanceRow>(
         `seoul_distance_restriction?select=reference_feature,building_use_name,facility_key,hard_ban_distance_m,review_distance_m,condition_note,statute_ref&ucode=eq.${zone.ucode}`
+      ),
+      // 조례 건폐율·용적률 상한. 국가 시행령 상한과 함께 더 엄격한 값을 적용해야 한다.
+      selectRows<OrdinanceLimitRow>(
+        `zone_far_bcr_limit?select=max_bcr_pct,max_far_pct,max_far_pct_special,special_scope,statute_ref,condition_note,base_date&ucode=eq.${zone.ucode}`
       ),
     ]);
 
@@ -301,6 +318,8 @@ export async function GET(request: NextRequest) {
         key,
         label: facility.facility_label,
         group: facility.facility_group,
+        // 건축법 용도 → 수익시설 10분류. 화면의 시설 타일은 이 코드로 매칭한다.
+        facilityCodes: facility.facility_codes ?? [],
         decision,
         reason: joinReason(reasons),
         confidence,
@@ -312,9 +331,28 @@ export async function GET(request: NextRequest) {
 
     const caveatText = caveats.map((row) => `${row.statute_ref} ${row.clause}: ${row.caveat_text}`);
 
+    const limitRow = limitRows[0] ?? null;
+
+    // 프론트가 넘긴 연면적은 국가 상한 기준이다. 조례 용적률이 더 엄격하면 그쪽으로 낮춘다.
+    if (limitRow?.max_far_pct && siteAreaSqm && siteAreaSqm > 0) {
+      const ordinanceGfa = siteAreaSqm * (limitRow.max_far_pct / 100);
+      requestedGfa = requestedGfa ? Math.min(requestedGfa, ordinanceGfa) : ordinanceGfa;
+    }
+
     return NextResponse.json({
       ok: true,
       zone: { ucode: zone.ucode, name: zone.zone_name_kr, listType },
+      ordinanceLimit: limitRow
+        ? {
+            bcrMaxPct: limitRow.max_bcr_pct,
+            farMaxPct: limitRow.max_far_pct,
+            farMaxPctSpecial: limitRow.max_far_pct_special,
+            specialScope: limitRow.special_scope,
+            legalBasis: limitRow.statute_ref,
+            note: limitRow.condition_note,
+            baseDate: limitRow.base_date,
+          }
+        : null,
       facilities: results,
       caveats: caveatText,
       diagnostics: {

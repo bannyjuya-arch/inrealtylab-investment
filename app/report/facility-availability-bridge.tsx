@@ -2,28 +2,25 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { COMMERCIAL_CATEGORIES } from "@/lib/integrated-report";
+
+// 2026-09-05: 수익시설 타일을 facility_group(7종)이 아니라 수익시설 코드(C01~C10)로 매칭하도록 바꿨다.
+// 그전에는 타일 키가 LOGISTICS_WAREHOUSE·RESIDENTIAL·HEALTHCARE·EDUCATION_RESEARCH·
+// INDUSTRIAL_MANUFACTURING·DATA_CENTER·MIXED_USE 였는데 DB의 facility_group에는 그런 값이 없어
+// 10개 중 6개가 무슨 필지를 넣든 영구히 "추가 확인"으로만 표시됐다.
+// 이제 part1_facility_catalog.facility_codes 가 건축법 용도를 수익시설 분류에 연결하고,
+// 시설 목록·이름은 lib/integrated-report 의 COMMERCIAL_CATEGORIES 한 곳에서만 온다.
 
 type Decision = "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW";
-type RevenueGroup =
-  | "OFFICE"
-  | "RETAIL"
-  | "LOGISTICS_WAREHOUSE"
-  | "RESIDENTIAL"
-  | "HOSPITALITY"
-  | "HEALTHCARE"
-  | "EDUCATION_RESEARCH"
-  | "INDUSTRIAL_MANUFACTURING"
-  | "DATA_CENTER"
-  | "MIXED_USE";
-type Group = RevenueGroup | "PUBLIC";
 
 type FacilityResult = {
   key: string;
   label: string;
-  group: Group;
+  group: string;
   decision: Decision;
   reason?: string;
   confidence?: number;
+  facilityCodes?: string[];
 };
 
 type AllowedUseResponse = {
@@ -32,22 +29,7 @@ type AllowedUseResponse = {
   message?: string;
 };
 
-type AggregatedFacility = FacilityResult & {
-  parcelCount: number;
-};
-
-const REVENUE_GROUPS: { key: RevenueGroup; label: string }[] = [
-  { key: "OFFICE", label: "오피스" },
-  { key: "RETAIL", label: "리테일" },
-  { key: "LOGISTICS_WAREHOUSE", label: "물류/창고" },
-  { key: "RESIDENTIAL", label: "주거" },
-  { key: "HOSPITALITY", label: "숙박" },
-  { key: "HEALTHCARE", label: "의료/헬스케어" },
-  { key: "EDUCATION_RESEARCH", label: "교육/연구" },
-  { key: "INDUSTRIAL_MANUFACTURING", label: "산업/제조" },
-  { key: "DATA_CENTER", label: "데이터센터" },
-  { key: "MIXED_USE", label: "복합용도" },
-];
+type AggregatedFacility = FacilityResult & { parcelCount: number };
 
 const decisionRank: Record<Decision, number> = {
   ALLOWED: 1,
@@ -65,10 +47,14 @@ const decisionLabel: Record<Decision, string> = {
 
 function readContext() {
   const params = new URLSearchParams(window.location.search);
-  const pnus = [...new Set((params.get("pnus") ?? params.get("pnu") ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => /^\d{19}$/.test(item)))];
+  const pnus = [
+    ...new Set(
+      (params.get("pnus") ?? params.get("pnu") ?? "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter((item) => /^\d{19}$/.test(item))
+    ),
+  ];
 
   let zoneName = "";
   try {
@@ -78,7 +64,7 @@ function readContext() {
       zoneName = parsed.primaryZone?.trim() ?? "";
     }
   } catch {
-    // query-string fallback below
+    // 아래 쿼리스트링 폴백으로 넘어간다
   }
 
   if (!zoneName) {
@@ -89,7 +75,7 @@ function readContext() {
         zoneName = parsed.primaryZone?.trim() ?? "";
       }
     } catch {
-      // keep empty zone name
+      // 용도지역 없이도 판정은 진행한다
     }
   }
 
@@ -107,6 +93,7 @@ function aggregateFacilities(results: FacilityResult[][]): AggregatedFacility[] 
   }
 
   return [...byKey.values()].map((items) => {
+    // 복수 필지는 한 필지라도 더 엄격한 판정이 있으면 그쪽을 따른다.
     const strongest = [...items].sort((a, b) => decisionRank[b.decision] - decisionRank[a.decision])[0];
     return {
       ...strongest,
@@ -131,39 +118,65 @@ function PublicFacilities({ facilities }: { facilities: AggregatedFacility[] }) 
       {usable.length ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           {usable.map((facility) => (
-            <span key={facility.key} title={facility.reason || undefined} className={`report-status ${badgeTone(facility.decision)}`}>
+            <span
+              key={facility.key}
+              title={facility.reason || undefined}
+              className={`report-status ${badgeTone(facility.decision)}`}
+            >
               {facility.label} · {decisionLabel[facility.decision]}
             </span>
           ))}
         </div>
       ) : (
-        <div className="report-warning">현재 자동판정에서 사용 가능 또는 조건부 검토 기본 수요시설이 확인되지 않았습니다.</div>
+        <div className="report-warning">
+          현재 자동판정에서 사용 가능 또는 조건부 검토 기본 수요시설이 확인되지 않았습니다.
+        </div>
       )}
     </div>
   );
 }
 
 function RevenueFacilities({ facilities }: { facilities: AggregatedFacility[] }) {
-  const byGroup = new Map<RevenueGroup, AggregatedFacility>();
+  // 수익시설 코드 → 그 코드로 지을 수 있다고 판정된 건축법 용도들 중 가장 유리한 판정.
+  const byCode = new Map<string, AggregatedFacility>();
   for (const facility of facilities) {
-    if (facility.group === "PUBLIC") continue;
-    const group = facility.group as RevenueGroup;
-    const current = byGroup.get(group);
-    if (!current || decisionRank[facility.decision] > decisionRank[current.decision]) byGroup.set(group, facility);
+    for (const code of facility.facilityCodes ?? []) {
+      const current = byCode.get(code);
+      if (!current || decisionRank[facility.decision] < decisionRank[current.decision]) {
+        byCode.set(code, facility);
+      }
+    }
   }
 
   return (
     <div className="report-card" style={{ minHeight: 0 }}>
-      <h3 style={{ marginBottom: 4 }}>수익시설 10개 유형</h3>
-      <div className="report-source" style={{ marginBottom: 12 }}>Part 3 수익시설 분류 기준</div>
+      <h3 style={{ marginBottom: 4 }}>수익시설 유형별 가능 여부</h3>
+      <div className="report-source" style={{ marginBottom: 12 }}>인리얼티 내부 DB 분석 기준</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
-        {REVENUE_GROUPS.map((group) => {
-          const facility = byGroup.get(group.key);
-          const decision: Decision = facility?.decision ?? "REVIEW";
+        {COMMERCIAL_CATEGORIES.map((category) => {
+          const facility = byCode.get(category.key);
           return (
-            <div key={group.key} title={facility?.reason || "자동판정 근거 추가 확인 필요"} style={{ border: "1px solid #eaecf0", borderRadius: 10, padding: 10 }}>
-              <strong style={{ display: "block", marginBottom: 6 }}>{group.label}</strong>
-              <span className={`report-status ${badgeTone(decision)}`}>{decisionLabel[decision]}</span>
+            <div
+              key={category.key}
+              title={
+                facility
+                  ? `${facility.label} 기준 · ${facility.reason || "판정 근거 없음"}`
+                  : "이 용도지역에서 판정된 대응 건축물 용도가 없습니다."
+              }
+              style={{ border: "1px solid #eaecf0", borderRadius: 10, padding: 10 }}
+            >
+              <strong style={{ display: "block", marginBottom: 6 }}>{category.label}</strong>
+              {facility ? (
+                <>
+                  <span className={`report-status ${badgeTone(facility.decision)}`}>
+                    {decisionLabel[facility.decision]}
+                  </span>
+                  <div className="report-source" style={{ marginTop: 6 }}>{facility.label}</div>
+                </>
+              ) : (
+                // 판정하지 않은 것과 판정해서 불가인 것은 다르다. 섞어서 보여주지 않는다.
+                <span className="report-status review">판정자료 없음</span>
+              )}
             </div>
           );
         })}
@@ -192,8 +205,8 @@ export default function FacilityAvailabilityBridge() {
       if (!node) {
         node = document.createElement("div");
         node.id = "inrealtylab-facility-availability";
-        // 2026-08-26 확정: ALLOWED USE도 Part 2 자동판정 근거(내부 DB 기준)에 해당하므로
-        // 외부 공유용 보고서에서는 인쇄 시에도, 관리자 로그인 전 화면에서도 숨긴다.
+        // 2026-08-26 확정: 자동판정 근거(내부 DB 기준)라 외부 공유용 보고서에서는
+        // 인쇄 시에도, 관리자 로그인 전 화면에서도 숨긴다.
         node.className = "report-section no-print admin-only";
         demandSection.parentElement?.insertBefore(node, demandSection);
       }
@@ -210,31 +223,31 @@ export default function FacilityAvailabilityBridge() {
     const { pnus, zoneName } = readContext();
     if (!pnus.length) {
       setLoading(false);
-      setError("사용 가능 시설을 판정할 PNU가 없습니다.");
+      setError("사용 가능 시설을 판정할 필지가 선택되지 않았습니다.");
       return () => window.clearInterval(timer);
     }
 
-    Promise.all(pnus.map(async (pnu) => {
-      const query = new URLSearchParams({ pnu });
-      if (zoneName) query.set("zoneName", zoneName);
-      const response = await fetch(`/api/allowed-use?${query.toString()}`, { cache: "no-store" });
-      const data = (await response.json()) as AllowedUseResponse;
-      if (!response.ok || !data.ok) throw new Error(data.message || "시설 사용가능 여부 조회 실패");
-      return data.facilities ?? [];
-    }))
+    Promise.all(
+      pnus.map(async (pnu) => {
+        const query = new URLSearchParams({ pnu });
+        if (zoneName) query.set("zoneName", zoneName);
+        const response = await fetch(`/api/allowed-use?${query.toString()}`, { cache: "no-store" });
+        const data = (await response.json()) as AllowedUseResponse;
+        if (!response.ok || !data.ok) throw new Error(data.message || "시설 사용가능 여부 조회 실패");
+        return data.facilities ?? [];
+      })
+    )
       .then((rows) => {
         if (cancelled) return;
         const aggregated = aggregateFacilities(rows);
         setFacilities(aggregated);
         try {
-          sessionStorage.setItem("inrealtylab.allowedFacilities", JSON.stringify({
-            capturedAt: new Date().toISOString(),
-            zoneName,
-            pnus,
-            facilities: aggregated,
-          }));
+          sessionStorage.setItem(
+            "inrealtylab.allowedFacilities",
+            JSON.stringify({ capturedAt: new Date().toISOString(), zoneName, pnus, facilities: aggregated })
+          );
         } catch {
-          // report rendering does not depend on storage
+          // 보고서 렌더링은 저장 성공 여부에 의존하지 않는다
         }
       })
       .catch((cause) => {
@@ -251,14 +264,13 @@ export default function FacilityAvailabilityBridge() {
   }, []);
 
   const publicFacilities = useMemo(() => facilities.filter((item) => item.group === "PUBLIC"), [facilities]);
-  const revenueFacilities = useMemo(() => facilities.filter((item) => item.group !== "PUBLIC"), [facilities]);
 
   if (!mount) return null;
 
   return createPortal(
     <>
       <div className="report-section-head">
-        <div><span>ALLOWED USE</span><br /><strong>사용 가능 시설</strong></div>
+        <div><span>용도판정</span><br /><strong>사용 가능 시설</strong></div>
       </div>
       <div className="report-note" style={{ marginBottom: 12 }}>
         용도지역·토지이용규제 기준의 1차 자동판정입니다. 복수 필지는 한 필지라도 더 엄격한 판정이 있으면 그 결과를 적용합니다.
@@ -270,7 +282,7 @@ export default function FacilityAvailabilityBridge() {
       ) : (
         <div className="report-grid">
           <PublicFacilities facilities={publicFacilities} />
-          <RevenueFacilities facilities={revenueFacilities} />
+          <RevenueFacilities facilities={facilities} />
         </div>
       )}
     </>,

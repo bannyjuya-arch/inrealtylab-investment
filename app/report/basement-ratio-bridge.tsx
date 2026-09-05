@@ -22,26 +22,12 @@ function findBasementInput() {
   return field && input ? { field, label, input } : null;
 }
 
-function updateTerminology() {
-  const replacements = new Map([
-    ["지상 개발가능 GFA", "지상 연면적"],
-    ["지하 GFA", "지하 연면적"],
-    ["총 공사 GFA", "전체 연면적"],
-    ["지상 GFA", "지상 연면적"],
-  ]);
-
-  document.querySelectorAll<HTMLElement>("td, th").forEach((cell) => {
-    const text = cell.textContent?.trim();
-    const replacement = text ? replacements.get(text) : undefined;
-    if (replacement) cell.textContent = replacement;
-  });
-
-  document.querySelectorAll<HTMLElement>(".report-note").forEach((note) => {
-    if (note.textContent?.includes("건축HUB") || note.textContent?.includes("지하 GFA")) {
-      note.textContent = "지하 연면적은 DB·건축HUB 조회값을 사용하지 않습니다. 30~50% 범위에서 5% 단위로 선택한 지하 개발비율을 지상 연면적에 적용해 산정합니다.";
-    }
-  });
-}
+// 2026-09-05: updateTerminology() 를 삭제했다.
+// (1) 바꾸려던 문자열("지상 개발가능 GFA", "총 공사 GFA", "지상 GFA")은 page.tsx 에서 이미
+//     한글로 바뀌어 더 이상 존재하지 않는다.
+// (2) 남은 한 가지 동작이 위험했다 — "건축HUB"가 들어간 .report-note 를 통째로 고정문구로
+//     덮어써서, 건축HUB에서 실제로 읽어온 기존 건축물 지하비율(예: 38.2%)이 화면에서 사라졌다.
+// 용어 교정은 이제 page.tsx 소스에서 직접 한다. 이 브리지는 지하비율 선택 버튼만 담당한다.
 
 function installStyles() {
   if (document.getElementById("inrealtylab-basement-ratio-style")) return;
@@ -83,7 +69,6 @@ function installStyles() {
 
 function applyBasementSelector() {
   installStyles();
-  updateTerminology();
 
   const target = findBasementInput();
   if (!target) return false;
