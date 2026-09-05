@@ -785,7 +785,9 @@ export default function ReportPage() {
           </tbody></table>
           <div className="report-note" style={{ marginTop: 10 }}>
             {basementReference?.ratioPct !== null && basementReference?.ratioPct !== undefined
-              ? `지하 연면적은 건축HUB 층별개요의 기존 건축물 참고비율 ${basementReference.ratioPct.toFixed(1)}%를 초기값으로 적용했습니다. 미래 계획 지하규모의 확정값이 아니며 직접 수정할 수 있습니다.`
+              ? (isAdmin
+                  ? `지하 연면적은 건축HUB 층별개요의 기존 건축물 참고비율 ${basementReference.ratioPct.toFixed(1)}%를 초기값으로 적용했습니다. 미래 계획 지하규모의 확정값이 아니며, 3면 ASSUMPTIONS의 '지하/지상 비율 %'에서 수정할 수 있습니다.`
+                  : `지하 연면적은 건축HUB 층별개요의 기존 건축물 참고비율 ${basementReference.ratioPct.toFixed(1)}%를 초기값으로 자동 적용했습니다. 미래 계획 지하규모의 확정값은 아닙니다.`)
               : "건축HUB에서 유효한 지상·지하 층별 면적을 찾지 못해 지하 비율은 자동 추정하지 않았습니다."}
           </div>
         </div>
