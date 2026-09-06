@@ -14,6 +14,7 @@ import {
   type CommercialCategoryKey,
   type DemandInputs,
   type FinancialAssumptions,
+  type FinancialCell,
 } from "../../lib/integrated-report";
 import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
 import ReportMap from "./report-map";
@@ -605,6 +606,39 @@ export default function ReportPage() {
     };
   }, [representativeLandPricePerSqm, structurePolicy]);
 
+  // 2026-09-06 확정: 시설별 공사비 단가를 DB에서 받아 sessionStorage에 넣는다.
+  // integrated-report.ts의 readFacilityConstructionCost가 이 키를 읽어, Part 2(프로그램 구성)에서
+  // 배분한 수익시설 비율×시설별 단가로 공사비를 가중합한다. 대표님 지침 — "표준공사비" 수동값
+  // 하나를 건물 전체에 곱하는 대신, 실제 시설 구성만큼 공사비가 들어가야 더 정밀하다.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`/api/construction-cost?all=1`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || !data.ok || cancelled) return;
+
+        try {
+          const costs = data.costs as Array<{ facilityCode: string; defaultCostPerSqm: number | null }>;
+          for (const item of costs) {
+            if (item.defaultCostPerSqm === null) continue;
+            window.sessionStorage.setItem(
+              `inrealtylab.constructionCost.${item.facilityCode}`,
+              String(item.defaultCostPerSqm)
+            );
+          }
+        } catch {
+          // 세션 저장이 막힌 환경에서도 화면은 그대로 나와야 한다.
+        }
+      } catch {
+        // 조회 실패 시 시설별 공사비는 0으로 남고, 나머지 면적 몫(표준공사비 입력값)만 반영된다.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // 시설별 적용 임대료를 DB에서 받아 sessionStorage에 넣는다.
   // integrated-report.ts의 readFacilityRent가 이 키를 읽는데, 지금까지 아무도 쓰지 않아
   // 모든 시설의 임대료가 0으로 계산됐다(= 매출 0 → DSCR·IRR 산출 불가).
@@ -929,7 +963,7 @@ export default function ReportPage() {
         <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>ASSUMPTIONS</span><br /><strong>사업비·운영·금융 입력</strong></div></div>
           <div className="report-form-grid">
             <Field label="지하/지상 비율 %" value={assumptions.basementRatioPct} onChange={(v) => setAssumption("basementRatioPct", v)} />
-            <Field label="표준공사비 원/㎡" value={assumptions.constructionCostPerSqm} onChange={(v) => setAssumption("constructionCostPerSqm", v)} />
+            <Field label="표준공사비 원/㎡ (수익시설 외 나머지 면적)" value={assumptions.constructionCostPerSqm} onChange={(v) => setAssumption("constructionCostPerSqm", v)} />
             <Field label="시장 임대료 원/㎡·월" value={assumptions.monthlyRentPerSqm} onChange={(v) => setAssumption("monthlyRentPerSqm", v)} />
             <Field label="OPEX / 매출 %" value={assumptions.opexPct} onChange={(v) => setAssumption("opexPct", v)} />
             <Field label="시장 기준금리 %" value={assumptions.referenceRatePct} onChange={(v) => setAssumption("referenceRatePct", v)} />
@@ -1076,6 +1110,21 @@ function Field({ label, value, onChange }: { label: string; value: number | null
   return <div className="report-field"><label>{label}</label><input inputMode="decimal" value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder="자동연결 / 직접입력" /></div>;
 }
 
+// 2026-09-06 확정: DSCR 셀에 마우스를 올리면 실제 연간 사업 현금흐름·원리금상환액과,
+// 목표 DSCR을 채우는 데 얼마가 더 필요한지(부족분)를 title 툴팁으로 보여준다.
+// "얼마나 매출이 더 있어야 DSCR이 되는지" 화면에서 직접 확인하기 위한 것 — 화면 레이아웃은 안 바꾼다.
+function dscrGapTitle(cell: FinancialCell, dscrPassMin: number) {
+  if (cell.annualDebtService === null || cell.annualProjectCashflow === null) {
+    return "공사비·매출 등 입력이 부족해 현금흐름을 계산하지 못했습니다.";
+  }
+  const requiredCashflow = cell.annualDebtService * dscrPassMin;
+  const shortfall = requiredCashflow - cell.annualProjectCashflow;
+  const shortfallText = shortfall > 0
+    ? `DSCR ${dscrPassMin.toFixed(2)} 충족까지 연간 현금흐름 ${formatWon(shortfall)} 부족`
+    : `DSCR ${dscrPassMin.toFixed(2)} 기준 충족(여유 ${formatWon(-shortfall)})`;
+  return `연간 사업 현금흐름 ${formatWon(cell.annualProjectCashflow)} · 원리금상환액 ${formatWon(cell.annualDebtService)} · ${shortfallText}`;
+}
+
 function Matrix({ mode, analysis }: { mode: "BTO" | "REITS"; analysis: ReturnType<typeof buildIntegratedAnalysis> }) {
-  return <table className="report-table"><thead><tr><th>개발규모</th>{CONCESSION_TERMS.map((term) => <th key={term}>{term}년</th>)}</tr></thead><tbody>{DEVELOPMENT_SCENARIOS.map((scenario) => <tr key={scenario.key}><td>{scenario.label}</td>{CONCESSION_TERMS.map((term) => { const cell = analysis.financialMatrix.find((item) => item.scenarioKey === scenario.key && item.term === term); if (!cell) return <td key={term}>-</td>; const status = mode === "BTO" ? cell.btoBotStatus : cell.reitsStatus; return <td key={term}><span className="matrix-value">{mode === "BTO" ? (cell.dscr?.toFixed(2) ?? "-") : irrText(cell.projectIrr)}</span><span className={`report-status ${statusTone(status)}`}>{statusLabel(status)}</span>{mode === "REITS" && cell.investorReturnSatisfied !== null && <div className="matrix-sub">출자자 {cell.investorReturnSatisfied ? "충족" : "미충족"}</div>}</td>; })}</tr>)}</tbody></table>;
+  return <table className="report-table"><thead><tr><th>개발규모</th>{CONCESSION_TERMS.map((term) => <th key={term}>{term}년</th>)}</tr></thead><tbody>{DEVELOPMENT_SCENARIOS.map((scenario) => <tr key={scenario.key}><td>{scenario.label}</td>{CONCESSION_TERMS.map((term) => { const cell = analysis.financialMatrix.find((item) => item.scenarioKey === scenario.key && item.term === term); if (!cell) return <td key={term}>-</td>; const status = mode === "BTO" ? cell.btoBotStatus : cell.reitsStatus; return <td key={term} title={mode === "BTO" ? dscrGapTitle(cell, analysis.dscrPassMin) : undefined}><span className="matrix-value">{mode === "BTO" ? (cell.dscr?.toFixed(2) ?? "-") : irrText(cell.projectIrr)}</span><span className={`report-status ${statusTone(status)}`}>{statusLabel(status)}</span>{mode === "REITS" && cell.investorReturnSatisfied !== null && <div className="matrix-sub">출자자 {cell.investorReturnSatisfied ? "충족" : "미충족"}</div>}</td>; })}</tr>)}</tbody></table>;
 }

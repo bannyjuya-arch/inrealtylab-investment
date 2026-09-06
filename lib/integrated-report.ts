@@ -323,6 +323,23 @@ function readFacilityRent(facilityCode: string) {
   }
 }
 
+/**
+ * 2026-09-06 확정: 시설별 공사비 단가(원/㎡). /api/construction-cost?all=1을 조회한 화면이
+ * `inrealtylab.constructionCost.${facilityCode}`에 써 넣는다(rent와 동일한 패턴).
+ * 값이 없으면 0으로 돌려주며, 이 시설이 배분돼 있으면 공사비 가중합에서 그만큼 비게 된다.
+ */
+function readFacilityConstructionCost(facilityCode: string) {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = window.sessionStorage.getItem(`inrealtylab.constructionCost.${facilityCode}`);
+    if (raw === null) return 0;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** 사용자가 화면에서 직접 고른 금리. 고르지 않았으면 null을 돌려줘야 DB 기준값이 쓰인다. */
 function readSelectedPfRatePct(): number | null {
   if (typeof window === "undefined") return null;
@@ -539,9 +556,30 @@ export function buildIntegratedAnalysis(input: {
         // 실제 수요 데이터가 입력되면 위 두 조건이 우선 적용되어 이 기본값은 자동으로 대체된다.
         : Math.max(0, aboveGroundGfa * PILOT_COMMERCIAL_RATIO);
 
-    const constructionCapex = totalConstructionGfa === null || costPerSqm === null
+    // 2026-09-06 확정: "표준공사비" 수동 입력 하나를 건물 전체 연면적에 곱하던 방식을 버렸다.
+    // 대표님 지침 — Part 2(프로그램 구성)에서 실제 배분한 수익시설 비율×각 시설 단가로
+    // 가중합해야 더 정밀하다. "표준공사비" 입력값은 이제 수익시설을 뺀 나머지 면적
+    // (공공시설·지하 등)에만 적용되는 대체값으로 범위를 좁혔다.
+    const costAllocationSnapshot = readCommercialAllocation();
+    const costFacilities = costAllocationSnapshot?.complete && costAllocationSnapshot.facilities?.length
+      ? costAllocationSnapshot.facilities
+      : [{ facilityCode: "C01_OFFICE", ratioPct: 100 }];
+    const commercialConstructionCost = costFacilities.reduce((sum, facility) => {
+      const code = normalizeFacilityCode(String(facility.facilityCode ?? ""));
+      const ratioPct = Math.max(0, Math.min(100, Number(facility.ratioPct ?? 0)));
+      const allocatedGfaSqm = selectedCommercialGfa * ratioPct / 100;
+      const unitCost = readFacilityConstructionCost(code);
+      return sum + allocatedGfaSqm * unitCost;
+    }, 0);
+    const nonCommercialGfa = totalConstructionGfa === null
       ? null
-      : totalConstructionGfa * costPerSqm;
+      : Math.max(0, totalConstructionGfa - selectedCommercialGfa);
+    const nonCommercialConstructionCost = nonCommercialGfa === null || costPerSqm === null
+      ? null
+      : nonCommercialGfa * costPerSqm;
+    const constructionCapex = totalConstructionGfa === null
+      ? null
+      : commercialConstructionCost + (nonCommercialConstructionCost ?? 0);
 
     // 신탁 구조면 신탁보수를 사업비에 얹는다.
     // 부동산신탁업무보수규정 별표7 차입형토지신탁 개발보수 = 건설비 × 3/100 이내.

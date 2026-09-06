@@ -31,7 +31,10 @@ type CostResponse = {
 
 function findConstructionCostField() {
   const labels = Array.from(document.querySelectorAll<HTMLLabelElement>(".report-field label"));
-  const label = labels.find((item) => item.textContent?.trim() === "표준공사비 원/㎡");
+  // 2026-09-06: 이 입력칸의 라벨을 "표준공사비 원/㎡ (수익시설 외 나머지 면적)"으로 좁혔다.
+  // 수익시설 공사비는 이제 Part 2 배분×시설별 DB 단가로 자동 계산되고, 이 칸은 공공시설·지하 등
+  // 나머지 면적에만 적용된다.
+  const label = labels.find((item) => item.textContent?.trim() === "표준공사비 원/㎡ (수익시설 외 나머지 면적)");
   if (!label) return null;
   const field = label.closest<HTMLElement>(".report-field");
   const input = field?.querySelector<HTMLInputElement>("input");
@@ -70,9 +73,9 @@ export default function BusinessFacilityCostBridge() {
       const target = findConstructionCostField();
       if (!target) return false;
 
-      target.label.textContent = "선택 사업시설 공사비 원/㎡";
+      target.label.textContent = "나머지 면적(공공시설·지하 등) 대표 공사비 원/㎡";
       target.input.readOnly = true;
-      target.input.placeholder = "사업시설 선택 시 DB 자동조회";
+      target.input.placeholder = "대표 시설 선택 시 DB 자동조회";
       inputRef.current = target.input;
 
       let node = document.getElementById("inrealtylab-business-facility-selector");
@@ -173,10 +176,12 @@ export default function BusinessFacilityCostBridge() {
   return createPortal(
     <>
       <div className="report-section-head">
-        <div><span>BUSINESS FACILITY</span><br /><strong>사업시설 선택 · 공사비 연계</strong></div>
+        <div><span>BUSINESS FACILITY</span><br /><strong>나머지 면적 대표 공사비 선택</strong></div>
       </div>
       <div className="report-note" style={{ marginBottom: 12 }}>
-        선택한 사업시설의 공사비를 DB에서 조회합니다. 공사비 자료가 없는 시설은 단가와 공사비를 비워 둡니다 — 임의의 값으로 채우지 않습니다.
+        여기서 고른 건 수익시설이 아니라 공공시설·지하 등 "나머지 면적"에 쓸 대표 단가예요.
+        수익시설(오피스·리테일 등)의 공사비는 Part 2에서 배분한 비율×시설별 DB 단가로 이미 자동 계산됩니다.
+        공사비 자료가 없는 시설은 단가와 공사비를 비워 둡니다 — 임의의 값으로 채우지 않습니다.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
         {BUSINESS_FACILITIES.map((facility) => (
