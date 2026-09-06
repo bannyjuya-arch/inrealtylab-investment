@@ -1,6 +1,9 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
+# 2026-09-05: 루트만 무시하면 저장소 안에 든 사본(inrealtylab-exact-worker-v6 등)의
+# node_modules가 git add -A에 통째로 딸려 들어온다. 모든 깊이에서 무시한다.
+node_modules/
 /node_modules
 /.pnp
 .pnp.*
@@ -42,3 +45,4 @@ next-env.d.ts
 
 /app/generated/prisma
 Claude outputs/
+build.log

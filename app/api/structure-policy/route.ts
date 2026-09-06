@@ -239,7 +239,7 @@ export async function GET(request: NextRequest) {
     }
     if (policy.uses_exit_cap_rate) {
       unmodelled.push(
-        "잔존가치를 Exit Cap Rate로 산정하는 구조인데 part3_underwriting_default에 exit_cap_rate_pct 값이 없습니다. 현재는 잔존가 0으로 보수적으로 계산합니다."
+        "잔존가치를 Exit Cap Rate로 산정하는 구조입니다. part3_underwriting_default에 exit_cap_rate_pct 시장 기준값이 아직 없어, 3면 ASSUMPTIONS의 'Exit Cap Rate %'에 직접 입력해야 잔존가치가 IRR에 반영됩니다 — 비워두면 예전처럼 잔존가 0으로 보수적으로 계산합니다."
       );
     }
 

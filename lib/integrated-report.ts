@@ -54,6 +54,12 @@ export type FinancialAssumptions = {
   debtTenorYears: number | null;
   investorRequiredReturnPct: number | null;
   otherAnnualRevenue: number | null;
+  /**
+   * 리츠(usesExitCapRate=true인 사업구조)의 기간 말 잔존가치(EXIT_VALUE) 산정에 쓰는 Exit Cap Rate(%).
+   * part3_underwriting_default.exit_cap_rate_pct가 전 시설 미입력 상태라 DB 기준값이 없고,
+   * 값을 안 넣으면 예전처럼 잔존가 0(보수적 가정)으로 계산한다.
+   */
+  exitCapRatePct: number | null;
 };
 
 export type DemandInputs = {
@@ -102,6 +108,12 @@ export type FinancialCell = {
   debtAmount: number | null;
   annualDebtService: number | null;
   dscr: number | null;
+  /**
+   * 기간 말 잔존가치(EXIT_VALUE). usesExitCapRate 구조(리츠)에서 Exit Cap Rate가 입력됐을 때만
+   * 값이 들어가고, IRR 현금흐름의 마지막 해에 더해진다. null이면 잔존가 0(ZERO 정책 구조이거나
+   * 리츠인데 Exit Cap Rate 미입력)으로 계산됐다는 뜻.
+   */
+  terminalValue: number | null;
   btoBotStatus: "FAIL" | "CONDITIONAL" | "PASS" | "STRONG" | "REVIEW";
   projectIrr: number | null;
   reitsStatus: "FAIL" | "CONDITIONAL" | "PASS" | "REVIEW";
@@ -585,6 +597,8 @@ export function buildIntegratedAnalysis(input: {
   const ltcBasis: "USER" | "BENCHMARK" | "FALLBACK" =
     selectedLtc !== null ? "USER" : assumedDebtRatio !== null ? "BENCHMARK" : "FALLBACK";
   const investorRequiredReturn = nonNegative(input.assumptions.investorRequiredReturnPct);
+  const exitCapRatePct = nonNegative(input.assumptions.exitCapRatePct);
+  const usesExitCapRate = Boolean(structure?.usesExitCapRate);
   const otherAnnualRevenue = nonNegative(input.assumptions.otherAnnualRevenue) ?? 0;
 
   const financialMatrix = capacities.flatMap((capacity) => CONCESSION_TERMS.map((term): FinancialCell => {
@@ -648,11 +662,25 @@ export function buildIntegratedAnalysis(input: {
       ? null
       : annualProjectCashflow / annualDebtService;
 
+    // 기간 말 잔존가치(EXIT_VALUE) — 사업구조가 usesExitCapRate(리츠)이고 Exit Cap Rate를
+    // 입력했을 때만 계산한다. NOI는 세전·부채상환 전 순영업현금흐름(cashflowBeforeTax, 매출 −
+    // 운영비 − 토지사용료 − 재산세)을 쓴다 — 부채상환·법인세는 자본구조·주체별 사정이라
+    // 캡레이트로 자산가치를 매길 때는 빼지 않는 것이 표준 방식이다. 입력이 없으면
+    // 예전과 동일하게 잔존가 0(보수적 가정)으로 남는다.
+    const terminalValue =
+      usesExitCapRate && exitCapRatePct !== null && exitCapRatePct > 0 && cashflowBeforeTax !== null && cashflowBeforeTax > 0
+        ? cashflowBeforeTax / (exitCapRatePct / 100)
+        : null;
+
     const projectIrr = capacity.totalProjectCost === null || annualProjectCashflow === null
       ? null
       : calculateIrr([
           -capacity.totalProjectCost,
-          ...Array.from({ length: term }, () => annualProjectCashflow),
+          ...Array.from({ length: term }, (_, yearIndex) =>
+            yearIndex === term - 1 && terminalValue !== null
+              ? annualProjectCashflow + terminalValue
+              : annualProjectCashflow
+          ),
         ]);
 
     const btoBotStatus = classifyDscr(dscr, dscrPassMin);
@@ -671,6 +699,7 @@ export function buildIntegratedAnalysis(input: {
       debtAmount,
       annualDebtService,
       dscr,
+      terminalValue,
       btoBotStatus,
       projectIrr,
       reitsStatus,

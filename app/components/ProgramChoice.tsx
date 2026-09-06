@@ -59,10 +59,23 @@ const PUBLIC_FACILITIES: Array<{ code: PublicCode; label: string; revenue: boole
 ];
 
 // part3_program_scenario_policy
+// 2026-09-06: 공공:수익 배분 기준을 고정값(60/40/20)에서 "규모 시나리오"(SiteProgram.tsx의
+// capacityScenarios) GAP 기반으로 바꿨다.
+//   GAP = 법정 최대(용적률 100%) − 기준 검토(용적률의 90%) = 법정상한 대비 10%p
+// 대표님 지침: 이 GAP을 공공성 배분의 기준(균형형)으로 삼고, PPP사업의 기본은 수익사업이므로
+// 공공성 강화는 거기서 +5%p, 수익성 증가는 −5%p로 시작한다.
+// (부지마다 법정 FAR 값 자체는 달라도 90%/100%의 비율 차이는 항상 10%p라 GAP은 10으로 고정된다.)
+const SCALE_SCENARIO_GAP_PCT = 10; // SiteProgram.tsx: 기준 검토(90%) ~ 법정 최대(100%)
+const BASE_PUBLIC_PCT = SCALE_SCENARIO_GAP_PCT; // 균형형 기준 = 10%
 const SCENARIOS = [
-  { code: "PUBLIC_FOCUS", name: "공공성 중심", publicPct: 60, commercialPct: 40 },
-  { code: "BASE", name: "균형형", publicPct: 40, commercialPct: 60 },
-  { code: "COMMERCIAL_FOCUS", name: "수익성 중심", publicPct: 20, commercialPct: 80 },
+  { code: "PUBLIC_FOCUS", name: "공공성 중심", publicPct: BASE_PUBLIC_PCT + 5, commercialPct: 100 - (BASE_PUBLIC_PCT + 5) },
+  { code: "BASE", name: "균형형", publicPct: BASE_PUBLIC_PCT, commercialPct: 100 - BASE_PUBLIC_PCT },
+  {
+    code: "COMMERCIAL_FOCUS",
+    name: "수익성 중심",
+    publicPct: Math.max(0, BASE_PUBLIC_PCT - 5),
+    commercialPct: 100 - Math.max(0, BASE_PUBLIC_PCT - 5),
+  },
 ];
 
 const RECOMMENDED_SCENARIO = "BASE";
@@ -252,9 +265,15 @@ export default function ProgramChoice() {
     };
   }, [capsSqm, commercialGfa]);
 
-  // 1차 제안을 만들거나, 저장해둔 사용자 수정본을 되살린다.
+  // 1차 제안을 만들거나, 저장해둔 사용자 수정본을 되살린다 — 이건 최초 1회만 해야 하는 일이다.
+  // 버그였던 부분: 의존성 배열에 maxPctOf가 들어있었는데, maxPctOf는 commercialGfa가 바뀔 때마다
+  // (= 시나리오 카드를 "공공성 중심"/"수익성 중심"으로 바꿀 때마다) 새 함수 참조로 다시 만들어진다.
+  // 그러면 이 effect가 다시 실행되면서, 방금 setSelection으로 바꾼 scenarioCode가 sessionStorage에
+  // 아직 저장되기 전(=저장 effect가 뒤에 실행되기 전) 시점의 "변경 전" 값을 다시 읽어와 덮어써버려서
+  // 카드를 눌러도 원래대로 되돌아가는(화면이 흔들리는 것처럼 보이는) 문제가 있었다.
+  // selection이 이미 있으면(=최초 제안/복원이 끝났으면) 다시 실행하지 않도록 가드를 추가한다.
   useEffect(() => {
-    if (!allowedKeys) return;
+    if (!allowedKeys || selection) return;
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -270,7 +289,7 @@ export default function ProgramChoice() {
       publicFacilities: ["P_R_PARKING", "P_NR_SOCIAL_WELFARE_CENTER"],
       touched: [],
     });
-  }, [allowedKeys, available, maxPctOf]);
+  }, [allowedKeys, available, maxPctOf, selection]);
 
   useEffect(() => {
     if (!selection) return;
