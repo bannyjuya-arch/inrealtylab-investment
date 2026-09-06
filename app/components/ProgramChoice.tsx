@@ -304,7 +304,10 @@ export default function ProgramChoice() {
     return Object.values(selection.commercial).reduce((sum, value) => sum + (value ?? 0), 0);
   }, [selection]);
 
-  // 한 줄을 바꾸면 손대지 않은 줄들이 남은 몫을 나눠 갖는다.
+  // 한 줄을 바꾸면 나머지 줄들이(이미 손댄 줄 포함) 기존 비율을 유지한 채
+  // 남은 몫을 나눠 가져 합계가 항상 100%를 넘지 않도록 한다.
+  // (예전 버전은 "손대지 않은 줄"만 조정 대상이라, 두 줄 이상을 직접 수정하면
+  //  나머지가 그대로 얼어붙어 합계가 100%를 넘거나 못 미치는 문제가 있었다.)
   function setCommercialPct(code: CommercialCode, nextValue: number) {
     setSelection((current) => {
       if (!current) return current;
@@ -313,19 +316,45 @@ export default function ProgramChoice() {
       const value = Math.max(0, Math.min(ceiling, Math.round(nextValue)));
       const touched = current.touched.includes(code) ? current.touched : [...current.touched, code];
       const entries = Object.keys(current.commercial) as CommercialCode[];
-      const others = entries.filter((item) => item !== code && !touched.includes(item));
-      const fixed = entries
-        .filter((item) => item !== code && touched.includes(item))
-        .reduce((sum, item) => sum + (current.commercial[item] ?? 0), 0);
+      const others = entries.filter((item) => item !== code);
+      const remainder = Math.max(0, 100 - value);
 
       const next: Partial<Record<CommercialCode, number>> = { ...current.commercial, [code]: value };
-      const remainder = Math.max(0, 100 - value - fixed);
 
       if (others.length) {
-        const base = Math.floor(remainder / others.length);
+        const prevTotal = others.reduce((sum, item) => sum + (current.commercial[item] ?? 0), 0);
+        let pool = remainder;
+
         others.forEach((item, index) => {
-          next[item] = index === others.length - 1 ? remainder - base * (others.length - 1) : base;
+          const isLast = index === others.length - 1;
+          const otherFacility = COMMERCIAL.find((entry) => entry.code === item);
+          const itemCeiling = otherFacility ? maxPctOf(otherFacility) : 100;
+          const raw = isLast
+            ? pool
+            : prevTotal > 0
+              ? Math.round((remainder * (current.commercial[item] ?? 0)) / prevTotal)
+              : Math.round(remainder / others.length);
+          const capped = Math.max(0, Math.min(itemCeiling, raw));
+          next[item] = capped;
+          pool -= capped;
         });
+
+        // 상한에 걸려 다 못 나눠준 몫은 아직 여유가 있는 줄로 마저 배분한다.
+        // (그래도 남으면 이 필지의 총 상한이 부족한 것이라 합계가 100% 밑에서 멈춘다 —
+        //  100%를 넘기지 않는 쪽이 안전하므로 의도한 동작이다.)
+        if (pool > 0) {
+          for (const item of others) {
+            if (pool <= 0) break;
+            const otherFacility = COMMERCIAL.find((entry) => entry.code === item);
+            const itemCeiling = otherFacility ? maxPctOf(otherFacility) : 100;
+            const already = next[item] ?? 0;
+            const room = Math.max(0, itemCeiling - already);
+            if (room <= 0) continue;
+            const add = Math.min(room, pool);
+            next[item] = already + add;
+            pool -= add;
+          }
+        }
       }
 
       return { ...current, commercial: next, touched };
@@ -342,8 +371,43 @@ export default function ProgramChoice() {
   function removeFacility(code: CommercialCode) {
     setSelection((current) => {
       if (!current) return current;
+      const removedPct = current.commercial[code] ?? 0;
       const next = { ...current.commercial };
       delete next[code];
+      const remaining = Object.keys(next) as CommercialCode[];
+
+      // 제거한 시설의 비율을 나머지 시설들에게 기존 비율대로 되돌려줘서
+      // 합계가 항상 100%를 유지하도록 한다. (예전 버전은 그냥 버려서 합계가 100% 밑으로 떨어졌다.)
+      if (removedPct > 0 && remaining.length) {
+        const prevTotal = remaining.reduce((sum, item) => sum + (next[item] ?? 0), 0);
+        let pool = removedPct;
+        remaining.forEach((item, index) => {
+          const isLast = index === remaining.length - 1;
+          const otherFacility = COMMERCIAL.find((entry) => entry.code === item);
+          const itemCeiling = otherFacility ? maxPctOf(otherFacility) : 100;
+          const raw = isLast
+            ? pool
+            : prevTotal > 0
+              ? Math.round((removedPct * (next[item] ?? 0)) / prevTotal)
+              : Math.round(removedPct / remaining.length);
+          const capped = Math.max(0, Math.min(itemCeiling, (next[item] ?? 0) + raw) - (next[item] ?? 0));
+          next[item] = (next[item] ?? 0) + capped;
+          pool -= capped;
+        });
+        if (pool > 0) {
+          for (const item of remaining) {
+            if (pool <= 0) break;
+            const otherFacility = COMMERCIAL.find((entry) => entry.code === item);
+            const itemCeiling = otherFacility ? maxPctOf(otherFacility) : 100;
+            const room = Math.max(0, itemCeiling - (next[item] ?? 0));
+            if (room <= 0) continue;
+            const add = Math.min(room, pool);
+            next[item] = (next[item] ?? 0) + add;
+            pool -= add;
+          }
+        }
+      }
+
       return {
         ...current,
         commercial: next,

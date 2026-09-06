@@ -270,13 +270,16 @@ function irrText(value: number | null) {
 /**
  * 사용자 화면에 보이는 판정 표기. 내부 코드값(PASS·REVIEW…)은 관리자·DB 쪽에만 남긴다.
  */
-/** 적용 임대료 묶음의 기준일. 시설별 공표일이 다르면 가장 오래된 날짜가 전체의 기준일이 된다. */
-function rentAsOfDate(rent: RentResolverResponse | null): string {
-  if (!rent) return "";
-  const dates = rent.facilities
+/**
+ * 적용 임대료 묶음의 기준일. 시설별 공표일이 다르면 가장 오래된 날짜가 전체의 기준일이 된다.
+ * 화면에 실제로 표시되는(= 선택된) 시설 목록만 받아서, 걸러진 시설의 공표일이
+ * 기준일에 섞여 들어오지 않게 한다.
+ */
+function rentAsOfDate(facilities: RentFacility[], retailBaseDate: string | null | undefined): string {
+  const dates = facilities
     .map((item) => item.baseDate)
     .filter((item): item is string => Boolean(item));
-  if (!dates.length) return rent.retail?.baseDate ?? "";
+  if (!dates.length) return retailBaseDate ?? "";
   return dates.reduce((oldest, item) => (item < oldest ? item : oldest));
 }
 
@@ -669,6 +672,33 @@ export default function ReportPage() {
     // 임대료가 갱신되면 매출·DSCR·IRR이 달라지므로 의존성에 넣어 다시 계산하게 한다.
   }), [siteAreaSqm, snapshot.statutoryFarMaxPct, officialLandValue, demand, assumptions, structurePolicy, rent, propertyTax]);
 
+  // STEP 2에서 실제로 고른(= analysis가 매출 계산에 쓰는) 수익시설 코드만 뽑는다.
+  // 그전에는 이 값이 없어서 아래 "임대료" 표가 DB에 있는 시설 전부(오피스~디지털 인프라 10종)를
+  // 항상 보여줬다 — 사용자가 STEP 2에서 오피스·상업만 골랐어도 나머지 8개까지 함께 나왔다.
+  const selectedFacilityCodes = useMemo(() => {
+    const codes = new Set<string>();
+    for (const cell of analysis.financialMatrix) {
+      for (const line of cell.facilityOperatingLines) codes.add(line.facilityCode);
+    }
+    return codes;
+  }, [analysis]);
+
+  // 선택 정보를 아직 알 수 없을 때(코드가 하나도 안 잡힐 때)는 걸러내지 않고 예전처럼 전부 보여준다 —
+  // 실제로 걸러야 할 상황과 "아직 선택 전"인 상황을 구분해, 정보가 없다고 화면을 텅 비우지 않기 위함이다.
+  const visibleRentFacilities = useMemo(() => {
+    if (!rent) return [];
+    return selectedFacilityCodes.size
+      ? rent.facilities.filter((facility) => selectedFacilityCodes.has(facility.facilityCode))
+      : rent.facilities;
+  }, [rent, selectedFacilityCodes]);
+
+  const visibleRentMissing = useMemo(() => {
+    if (!rent) return [];
+    return selectedFacilityCodes.size
+      ? rent.missing.filter((code) => selectedFacilityCodes.has(code))
+      : rent.missing;
+  }, [rent, selectedFacilityCodes]);
+
   const ownershipGate = useMemo(() => {
     if (!ownership.length) return "REVIEW";
     if (ownership.some((item) => !item.result.ok)) return "REVIEW";
@@ -801,7 +831,7 @@ export default function ReportPage() {
         <div className="report-section no-print admin-only"><div className="report-section-head"><div><span>DEMAND ENGINE</span><br /><strong>시설별 연면적 DB 연결 슬롯</strong></div></div>
           <div className="report-demand-grid"><Field label="공공시설 필요면적 ㎡" value={demand.publicRequiredGfa} onChange={(v) => setDemand((c) => ({ ...c, publicRequiredGfa: parseNumber(v) }))} />{COMMERCIAL_CATEGORIES.map((item) => <Field key={item.key} label={`${item.label} ㎡`} value={demand.commercialSupportableGfa[item.key] ?? null} onChange={(v) => setCommercial(item.key, v)} />)}</div>
         </div>
-        <div className="report-section"><div className="report-section-head"><div><span>임대료</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{rentAsOfDate(rent) ? `기준일 ${rentAsOfDate(rent)}` : ""}</span></div>
+        <div className="report-section"><div className="report-section-head"><div><span>임대료</span><br /><strong>시설별 적용 임대료</strong></div><span className="report-source">{(() => { const asOf = rentAsOfDate(visibleRentFacilities, rent?.retail?.baseDate); return asOf ? `기준일 ${asOf}` : ""; })()}</span></div>
           <div className="report-form-grid no-print admin-only">
             <div className="report-field">
               <label>상가 유형</label>
@@ -842,7 +872,7 @@ export default function ReportPage() {
           {rent && (
             <>
               <table className="report-table"><thead><tr><th>시설</th><th>적용 임대료 원/㎡·월</th><th>지역</th><th>출처</th></tr></thead><tbody>
-                {rent.facilities.map((facility) => (
+                {visibleRentFacilities.map((facility) => (
                   <tr key={facility.facilityCode}>
                     <td className="left">{facilityLabel(facility.facilityCode)}</td>
                     <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
@@ -893,9 +923,9 @@ export default function ReportPage() {
                 </div>
               )}
 
-              {rent.missing.length > 0 && (
+              {visibleRentMissing.length > 0 && (
                 <div className="report-warning no-print admin-only" style={{ marginTop: 10 }}>
-                  임대료 미보유 — {rent.missing.map(facilityLabel).join(" · ")} (매출 0)
+                  임대료 미보유 — {visibleRentMissing.map(facilityLabel).join(" · ")} (매출 0)
                 </div>
               )}
 
@@ -906,7 +936,7 @@ export default function ReportPage() {
                 {[
                   rent.retail ? "한국부동산원 상업용부동산 임대동향조사" : null,
                   rent.housing ? "한국부동산원 전국주택가격동향조사" : null,
-                  ...rent.facilities.map((item) => (item.source ? `${facilityLabel(item.facilityCode)}: ${item.source}` : null)),
+                  ...visibleRentFacilities.map((item) => (item.source ? `${facilityLabel(item.facilityCode)}: ${item.source}` : null)),
                 ]
                   .filter((item): item is string => item !== null)
                   .join(" · ")}
