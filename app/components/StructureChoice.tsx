@@ -26,7 +26,9 @@ const DEFAULT_SELECTION: StructureSelection = {
   landRight: "CONCESSION",
   concessionType: "BTO",
   vehicle: "SPC",
-  publicContributionPct: 15,
+  // 2026-09-06: STEP 2 프로그램 구성의 균형형 기준(BASE_PUBLIC_PCT, ProgramChoice.tsx 참고 —
+  // 규모 시나리오 GAP 10%p)과 맞춰 기본 공공기여 비율도 15%에서 10%로 낮췄다.
+  publicContributionPct: 10,
 };
 
 const LAND_RIGHTS: Array<{ key: LandRight; title: string; desc: string }> = [
@@ -207,7 +209,7 @@ export default function StructureChoice() {
       <div className="choice-block">
         <div className="choice-head">
           <strong>공공기여 비율</strong>
-          <em className="choice-default">기본값 15%</em>
+          <em className="choice-default">기본값 10%</em>
         </div>
         <input
           className="choice-range"
