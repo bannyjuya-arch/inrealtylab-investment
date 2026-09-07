@@ -885,10 +885,25 @@ export default function ReportPage() {
 
           {rentError && <div className="report-warning">{rentError}</div>}
 
-          {rent && (
+          {rent && (() => {
+            // 카탈로그 전체(6~10개)를 다 보여주면 이 부지랑 무관한 시설까지 나온다.
+            // 일반 모드는 DEMAND ENGINE(관리자 전용)에 수요면적을 입력해 "합의한" 시설만
+            // 보여주고, 관리자는 다음 입력을 위해 계속 전체를 참고용으로 본다.
+            const agreedFacilities = isAdmin
+              ? rent.facilities
+              : rent.facilities.filter((facility) => {
+                  const gfa = demand.commercialSupportableGfa[facility.facilityCode as CommercialCategoryKey];
+                  return typeof gfa === "number" && gfa > 0;
+                });
+            return (
             <>
+              {!isAdmin && agreedFacilities.length === 0 && (
+                <div className="report-note" style={{ marginBottom: 10 }}>
+                  아직 합의된 수요시설이 없습니다. (관리자 모드에서 시설별 수요면적을 입력하면 여기 표시됩니다.)
+                </div>
+              )}
               <table className="report-table"><thead><tr><th>시설</th><th>적용 임대료 원/㎡·월</th><th>지역</th><th>출처</th></tr></thead><tbody>
-                {rent.facilities.map((facility) => (
+                {agreedFacilities.map((facility) => (
                   <tr key={facility.facilityCode}>
                     <td className="left">{facilityLabel(facility.facilityCode)}</td>
                     <td>{facility.rentPerSqmMonth.toLocaleString()}</td>
@@ -958,7 +973,8 @@ export default function ReportPage() {
                   .join(" · ")}
               </div>
             </>
-          )}
+            );
+          })()}
         </div>
 
         <div className="report-section"><div className="report-section-head"><div><span>수요 적합성</span><br /><strong>개발가능 면적과 수요시설 면적</strong></div></div>
