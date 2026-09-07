@@ -85,6 +85,46 @@ const emptyDemand: DemandInputs = {
   ) as Partial<Record<CommercialCategoryKey, number | null>>,
 };
 
+// 2026-09-07: demand는 지금까지 이 탭이 열려있는 동안만 살아있는 React state였다.
+// 관리자가 DEMAND ENGINE에 시설별 수요면적을 입력해도 새로고침하거나 일반 방문자가
+// 같은 링크를 다시 열면 사라져서, "합의한 수요시설만 보여주기" 필터가 항상 빈 결과만
+// 냈다. rent·constructionCost와 같은 sessionStorage 패턴으로 맞춘다.
+function readDemand(): DemandInputs {
+  if (typeof window === "undefined") return emptyDemand;
+  try {
+    const publicRaw = window.sessionStorage.getItem("inrealtylab.demand.public");
+    const commercial = Object.fromEntries(
+      COMMERCIAL_CATEGORIES.map((item) => {
+        const raw = window.sessionStorage.getItem(`inrealtylab.demand.commercial.${item.key}`);
+        const value = raw === null ? null : Number(raw);
+        return [item.key, Number.isFinite(value) ? value : null];
+      })
+    ) as Partial<Record<CommercialCategoryKey, number | null>>;
+    const publicValue = publicRaw === null ? null : Number(publicRaw);
+    return {
+      publicRequiredGfa: Number.isFinite(publicValue) ? publicValue : null,
+      commercialSupportableGfa: commercial,
+    };
+  } catch {
+    return emptyDemand;
+  }
+}
+
+function writeDemand(demand: DemandInputs) {
+  try {
+    if (demand.publicRequiredGfa === null) window.sessionStorage.removeItem("inrealtylab.demand.public");
+    else window.sessionStorage.setItem("inrealtylab.demand.public", String(demand.publicRequiredGfa));
+    for (const item of COMMERCIAL_CATEGORIES) {
+      const value = demand.commercialSupportableGfa[item.key];
+      const key = `inrealtylab.demand.commercial.${item.key}`;
+      if (value === null || value === undefined) window.sessionStorage.removeItem(key);
+      else window.sessionStorage.setItem(key, String(value));
+    }
+  } catch {
+    // 세션 저장이 막힌 환경에서도 화면(관리자 입력값)은 그대로 동작해야 한다.
+  }
+}
+
 type FinanceDefaultSource = {
   metricCode: string;
   value: number | null;
@@ -346,6 +386,7 @@ export default function ReportPage() {
   const [floorData, setFloorData] = useState<FloorParcel[]>([]);
   const [basementAutoApplied, setBasementAutoApplied] = useState(false);
   const [demand, setDemand] = useState<DemandInputs>(emptyDemand);
+  const [demandHydrated, setDemandHydrated] = useState(false);
   const [assumptions, setAssumptions] = useState<FinancialAssumptions>(initialAssumptions);
   const [financeDefaults, setFinanceDefaults] = useState<FinanceDefaults | null>(null);
   const [financeDefaultsError, setFinanceDefaultsError] = useState("");
@@ -685,6 +726,20 @@ export default function ReportPage() {
       cancelled = true;
     };
   }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea, housingType, housingStat]);
+
+  // 새로고침·재방문해도 관리자가 입력한 수요면적이 남아있게 sessionStorage에서 복원한다.
+  // 이게 없으면 관리자가 방금 입력한 값도 새로고침하는 순간 사라지고, 일반 모드의
+  // "합의한 수요시설만" 필터가 항상 빈 결과만 낸다.
+  useEffect(() => {
+    setDemand(readDemand());
+    setDemandHydrated(true);
+  }, []);
+
+  // 복원이 끝난 뒤부터만 저장한다 — 복원 전에 써버리면 emptyDemand로 기존 값을 지운다.
+  useEffect(() => {
+    if (!demandHydrated) return;
+    writeDemand(demand);
+  }, [demandHydrated, demand]);
 
   useEffect(() => {
     if (basementAutoApplied || assumptions.basementRatioPct !== null || basementReference?.ratioPct === null || basementReference?.ratioPct === undefined) return;
