@@ -109,8 +109,13 @@
 }
 .report-map-placeholder strong { display: block; color: #26292B; margin-bottom: 7px; }
 
-/* 2026-09-05: 보고서가 직접 그리는 지도. 자리표시자와 같은 크기를 쓴다. */
-.report-map { position: relative; min-height: 260px; border-radius: 10px; overflow: hidden; border: 1px solid #C3CCC7; background: #F6F8F7; }
+/* 2026-09-05: 보고서가 직접 그리는 지도. 자리표시자와 같은 크기를 쓴다.
+   2026-09-07: .report-grid는 기본 align-items:stretch라 지도가 옆 "대지 개요" 카드의
+   내용 높이(화면·인쇄에서 폰트·여백이 달라 서로 다름)에 맞춰 늘어나고 있었다. 그러면
+   지도 프레임의 가로세로 비율이 화면과 인쇄에서 서로 달라지고, JS가 인쇄 시점에
+   다시 fit해도 그 타이밍에 따라 잘려 보일 수 있다. align-self:start + aspect-ratio로
+   옆 카드 높이와 무관하게 비율을 고정해, 애초에 다시 fit할 필요를 없앤다. */
+.report-map { position: relative; align-self: start; aspect-ratio: 4 / 3; min-height: 260px; border-radius: 10px; overflow: hidden; border: 1px solid #C3CCC7; background: #F6F8F7; }
 .report-map-canvas { position: absolute; inset: 0; }
 .report-map-canvas canvas { border-radius: 10px; }
 .report-map-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #9DA09E; }
@@ -159,8 +164,10 @@
   .report-page-number { right: 14mm; bottom: 8mm; }
   .report-form-grid, .report-demand-grid { gap: 6px; }
   .report-field input, .report-field select { padding: 6px 7px; font-size: 10.5px; }
-  /* 인쇄에서는 지도 자리를 줄여 1면에 표가 하나 더 들어가게 합니다. */
-  .report-map-placeholder, .report-map { min-height: 150px; }
+  /* 인쇄에서는 지도 자리를 줄여 1면에 표가 하나 더 들어가게 합니다.
+     .report-map은 이제 aspect-ratio가 크기를 정하므로 여기서는 손대지 않는다 —
+     같이 건드리면 화면과 인쇄의 비율이 다시 어긋난다. */
+  .report-map-placeholder { min-height: 150px; }
   .report-map-loading { display: none; }
   .report-grid { gap: 12px; }
   .report-verdict { padding: 13px 16px; }

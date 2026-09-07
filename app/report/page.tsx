@@ -26,6 +26,10 @@ type Part1Snapshot = {
   primaryZone?: string | null;
   statutoryFarMaxPct?: number | null;
   statutoryBcrMaxPct?: number | null;
+  // STEP2 "용도지역 가정변경(시나리오)"에서 넘어온 값이면 true.
+  // 종상향 등 가정 시나리오를 실제 조회값과 착각하지 않도록 보고서에 표시한다(2026-09-07).
+  zoneIsOverride?: boolean;
+  actualPrimaryZone?: string | null;
 };
 
 type OwnershipRecord = {
@@ -799,6 +803,13 @@ export default function ReportPage() {
             <div className="report-source" style={{ marginTop: 8 }}>
               {landPriceByPnu.size ? "국토교통부 개별공시지가정보 자동조회" : "공시지가 자동조회값 없음 — 확인 필요"}
             </div>
+            {snapshot.zoneIsOverride && (
+              <div className="report-warning" style={{ marginTop: 10 }}>
+                용도지역 가정 시나리오입니다. 실제 조회된 용도지역은 {snapshot.actualPrimaryZone ?? "확인 필요"}이며,
+                위 건폐율·용적률·규모는 {snapshot.primaryZone}(으)로 종상향 등을 가정했을 때의 값입니다. 법적으로 확정된
+                용도지역이 아닙니다.
+              </div>
+            )}
           </div>
         </div>
         <div className="report-grid">

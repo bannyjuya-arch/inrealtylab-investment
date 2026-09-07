@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { findNationalZoneLimit } from "@/lib/zone-limits";
 
 const VWORLD_DATA_URL = "https://api.vworld.kr/req/data";
 
@@ -22,36 +23,6 @@ const LAYERS = [
   { id: "LT_C_UPISUQ171", category: "restriction", label: "개발행위허가제한지역" },
 ] as const;
 
-type ZoneLimit = { bcrMax: number; farMin: number; farMax: number };
-
-const ZONE_LIMITS: Record<string, ZoneLimit> = {
-  "제1종전용주거지역": { bcrMax: 50, farMin: 50, farMax: 100 },
-  "제2종전용주거지역": { bcrMax: 50, farMin: 50, farMax: 150 },
-  "제1종일반주거지역": { bcrMax: 60, farMin: 100, farMax: 200 },
-  "제2종일반주거지역": { bcrMax: 60, farMin: 100, farMax: 250 },
-  "제3종일반주거지역": { bcrMax: 50, farMin: 100, farMax: 300 },
-  "준주거지역": { bcrMax: 70, farMin: 200, farMax: 500 },
-  "중심상업지역": { bcrMax: 90, farMin: 200, farMax: 1500 },
-  "일반상업지역": { bcrMax: 80, farMin: 200, farMax: 1300 },
-  "근린상업지역": { bcrMax: 70, farMin: 200, farMax: 900 },
-  "유통상업지역": { bcrMax: 80, farMin: 200, farMax: 1100 },
-  "전용공업지역": { bcrMax: 70, farMin: 150, farMax: 300 },
-  "일반공업지역": { bcrMax: 70, farMin: 150, farMax: 350 },
-  "준공업지역": { bcrMax: 70, farMin: 150, farMax: 400 },
-  "보전녹지지역": { bcrMax: 20, farMin: 50, farMax: 80 },
-  "생산녹지지역": { bcrMax: 20, farMin: 50, farMax: 100 },
-  "자연녹지지역": { bcrMax: 20, farMin: 50, farMax: 100 },
-  "보전관리지역": { bcrMax: 20, farMin: 50, farMax: 80 },
-  "생산관리지역": { bcrMax: 20, farMin: 50, farMax: 80 },
-  "계획관리지역": { bcrMax: 40, farMin: 50, farMax: 100 },
-  "농림지역": { bcrMax: 20, farMin: 50, farMax: 80 },
-  "자연환경보전지역": { bcrMax: 20, farMin: 50, farMax: 80 },
-};
-
-function compact(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, "").trim();
-}
-
 function pickName(properties: Record<string, unknown>, fallback: string) {
   const keys = ["uname", "name", "zonename", "e_name", "dname", "title", "nm", "zone_name", "dan_name", "cat_nam", "dgm_nm", "upj_name"];
   for (const key of keys) {
@@ -59,12 +30,6 @@ function pickName(properties: Record<string, unknown>, fallback: string) {
     if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
   }
   return fallback;
-}
-
-function findZoneLimit(name: string) {
-  const normalized = compact(name);
-  const matched = Object.entries(ZONE_LIMITS).find(([zone]) => normalized.includes(compact(zone)));
-  return matched ? { zoneName: matched[0], ...matched[1] } : null;
 }
 
 async function queryLayer(
@@ -152,8 +117,8 @@ export async function GET(req: NextRequest) {
 
   const byCategory = (category: string) => hits.filter((hit) => hit.category === category);
   const useZones = byCategory("zone");
-  const primaryZoneHit = useZones.find((hit) => findZoneLimit(hit.name));
-  const statutoryLimit = primaryZoneHit ? findZoneLimit(primaryZoneHit.name) : null;
+  const primaryZoneHit = useZones.find((hit) => findNationalZoneLimit(hit.name));
+  const statutoryLimit = primaryZoneHit ? findNationalZoneLimit(primaryZoneHit.name) : null;
 
   const warnings: string[] = [];
   if (!useZones.length) warnings.push("용도지역 공간중첩 결과를 찾지 못했습니다.");

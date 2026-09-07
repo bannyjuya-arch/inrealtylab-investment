@@ -167,21 +167,32 @@ export default function ReportMap({ parcelCount }: { parcelCount: number }) {
         view: new ol.View({ center: [14135000, 4518000], zoom: 17 }),
       });
 
-      map.getView().fit(source.getExtent(), {
-        padding: [26, 26, 26, 26],
-        maxZoom: 18,
-      });
+      const fitToSource = () => {
+        map.updateSize();
+        const size = map.getSize();
+        // 컨테이너가 아직 0크기(레이아웃 전)면 fit이 잘못된 배율로 확정돼버리니 건너뛴다.
+        if (!size || size[0] <= 0 || size[1] <= 0) return;
+        map.getView().fit(source.getExtent(), {
+          padding: [26, 26, 26, 26],
+          maxZoom: 18,
+        });
+      };
+
+      fitToSource();
 
       mapRef.current = map;
       setStatus("READY");
 
-      // 인쇄 시점에 지면 크기로 다시 그리지 않으면 캔버스가 화면 크기 그대로 잘린다.
+      // updateSize()만으로는 캔버스 픽셀 크기만 바뀌고 확대·중심은 그대로라,
+      // 화면 비율로 잡아둔 뷰가 인쇄 페이지 비율에서는 엉뚱한 부분을 보여주며 잘린다.
+      // 인쇄 시점 크기로 뷰를 다시 fit해야 같은 필지가 잘리지 않고 온전히 들어온다.
       const onBeforePrint = () => {
-        map.updateSize();
+        fitToSource();
         map.renderSync();
       };
       window.addEventListener("beforeprint", onBeforePrint);
-      map.once("rendercomplete", () => map.updateSize());
+      // 최초 렌더 시점에도 같은 이유로 컨테이너가 자기 최종 크기를 잡은 뒤 한 번 더 맞춘다.
+      map.once("rendercomplete", () => fitToSource());
 
       return () => window.removeEventListener("beforeprint", onBeforePrint);
     })();

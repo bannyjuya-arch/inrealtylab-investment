@@ -10,6 +10,7 @@
 // { pnus, siteAreaSqm, center }를 읽어 동작한다.
 
 import { useEffect, useMemo, useState } from "react";
+import { ZONE_OVERRIDE_OPTIONS, findNationalZoneLimit } from "@/lib/zone-limits";
 
 const STEP1_KEY = "inrealtylab.step1";
 
@@ -133,11 +134,18 @@ export default function SiteProgram() {
   const [ordinanceLimit, setOrdinanceLimit] = useState<OrdinanceLimit | null>(null);
   const [allowedUseError, setAllowedUseError] = useState("");
   const [loading, setLoading] = useState(true);
+  // STEP2는 원래 "고를 수 있는 값이 아니라 조회된 값"만 보여준다. 다만 종상향 등
+  // 전제로 사업성을 검토하고 싶을 때를 위해, 조회된 용도지역과 별개로 딱 이 값만
+  // 가정해서 아래 규모·허용용도·STEP3 사업성까지 재계산하는 시나리오 입력을 둔다
+  // (2026-09-07). null이면 조회값을 그대로 쓴다.
+  const [zoneOverride, setZoneOverride] = useState<string | null>(null);
 
   useEffect(() => {
     setSnapshot(readSnapshot());
   }, []);
 
+  // ── 실제 조회값: VWorld 공간중첩으로 이 필지의 진짜 용도지역을 가져온다. ──
+  // 시나리오 가정과 무관하게 항상 "사실"만 담는다.
   useEffect(() => {
     if (!snapshot || !snapshot.center) {
       if (snapshot) setLoading(false);
@@ -149,15 +157,13 @@ export default function SiteProgram() {
 
     (async () => {
       setLoading(true);
-      let loadedRegulation: RegulationData | null = null;
-
       try {
         const response = await fetch(
           `/api/regulation?lon=${encodeURIComponent(center.lon)}&lat=${encodeURIComponent(center.lat)}&pnu=${encodeURIComponent(pnus[0])}`
         );
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회에 실패했습니다.");
-        loadedRegulation = data.regulation as RegulationData;
+        const loadedRegulation = data.regulation as RegulationData;
         if (!cancelled) setRegulation(loadedRegulation);
         // STEP 3 보고서가 읽는 스냅샷에 용도지역·법정상한을 채워 넣는다.
         // 예전에는 Part 1의 CAPACITY 탭에서 긁어 담던 값이다(2026-09-03).
@@ -172,6 +178,8 @@ export default function SiteProgram() {
               primaryZone: loadedRegulation.primaryZone,
               statutoryBcrMaxPct: loadedRegulation.statutoryLimit?.bcrMax ?? null,
               statutoryFarMaxPct: loadedRegulation.statutoryLimit?.farMax ?? null,
+              zoneIsOverride: false,
+              actualPrimaryZone: loadedRegulation.primaryZone,
             })
           );
         } catch {
@@ -179,66 +187,9 @@ export default function SiteProgram() {
         }
       } catch (error) {
         if (!cancelled) setRegulationError(error instanceof Error ? error.message : "규제정보 조회에 실패했습니다.");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-
-      // 허용용도는 용도지역이 확인된 뒤에만 의미가 있다.
-      if (loadedRegulation) {
-        try {
-          const zoneName = loadedRegulation.primaryZone ?? loadedRegulation.useZones[0]?.name ?? "";
-          const legalGfa = loadedRegulation.statutoryLimit
-            ? siteAreaSqm * (loadedRegulation.statutoryLimit.farMax / 100)
-            : null;
-          const gfaParam = legalGfa && legalGfa > 0 ? `&aboveGroundGfaSqm=${encodeURIComponent(legalGfa)}` : "";
-          const response = await fetch(
-            `/api/allowed-use?pnu=${encodeURIComponent(pnus[0])}&zoneName=${encodeURIComponent(zoneName)}&scenarioCode=BASE&siteAreaSqm=${encodeURIComponent(siteAreaSqm)}${gfaParam}`
-          );
-          const data = await response.json();
-          if (!response.ok || !data.ok) throw new Error(data?.message ?? "건축 가능시설 조회에 실패했습니다.");
-          if (!cancelled) {
-            setAllowedUse({
-              facilities: data.facilities ?? [],
-              caveats: data.caveats ?? [],
-              zone: data.zone,
-              diagnostics: data.diagnostics,
-              source: data.source,
-            });
-            setOrdinanceLimit((data.ordinanceLimit as OrdinanceLimit | null) ?? null);
-          }
-          // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설과 면적 상한을 걸러낼 때 쓴다.
-          const facilities: AllowedUseFacility[] = data.facilities ?? [];
-          const allowedKeys = facilities
-            .filter(
-              (facility) =>
-                facility.decision === "ALLOWED" ||
-                facility.decision === "CONDITIONAL" ||
-                facility.decision === "REVIEW"
-            )
-            .map((facility) => facility.key);
-          // 조례가 정한 용도별 바닥면적 상한. 이게 없으면 제2종일반주거에
-          // 오피스 3,700㎡ 같은 애초에 불가능한 규모를 제안하게 된다.
-          const useLimits: Record<string, { decision: AllowedUseDecision; maxGfaSqm: number | null }> = {};
-          for (const facility of facilities) {
-            useLimits[facility.key] = {
-              decision: facility.decision,
-              maxGfaSqm: facility.maxGfaSqm ?? null,
-            };
-          }
-          try {
-            sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
-            sessionStorage.setItem("inrealtylab.step2UseLimits", JSON.stringify(useLimits));
-          } catch {
-            // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
-          }
-          // 허용용도 조회는 비동기라 ProgramChoice가 먼저 뜬다. 끝났다고 알려준다.
-          window.dispatchEvent(
-            new CustomEvent("inrealtylab:allowedUse", { detail: { keys: allowedKeys, limits: useLimits } })
-          );
-        } catch (error) {
-          if (!cancelled) setAllowedUseError(error instanceof Error ? error.message : "건축 가능시설 조회에 실패했습니다.");
-        }
-      }
-
-      if (!cancelled) setLoading(false);
     })();
 
     return () => {
@@ -248,10 +199,112 @@ export default function SiteProgram() {
 
   const totalArea = snapshot?.siteAreaSqm ?? 0;
 
+  // ── 유효 용도지역: 시나리오 가정이 있으면 그 값, 없으면 실제 조회값. ──
+  // 이 값이 바뀌면 허용용도·개발가능규모·STEP3 사업성이 전부 다시 계산된다.
+  const effectiveZoneName = zoneOverride ?? regulation?.primaryZone ?? regulation?.useZones[0]?.name ?? null;
+
+  // 유효 용도지역의 국가 법정상한. 조회값 그대로면 VWorld 공간중첩 결과를,
+  // 가정 시나리오면 zone-limits 참조표를 쓴다. 두 경로 모두 legalBasis를 채워
+  // effectiveLimit 계산이 출처를 구분 없이 참조할 수 있게 한다.
+  const nationalLimitForEffectiveZone = useMemo(() => {
+    if (zoneOverride) {
+      const found = findNationalZoneLimit(zoneOverride);
+      if (!found) return null;
+      return {
+        bcrMax: found.bcrMax,
+        farMax: found.farMax,
+        legalBasis: "국토의 계획 및 이용에 관한 법률 시행령 제84조·제85조 (용도지역 가정 시나리오)",
+      };
+    }
+    return regulation?.statutoryLimit
+      ? {
+          bcrMax: regulation.statutoryLimit.bcrMax,
+          farMax: regulation.statutoryLimit.farMax,
+          legalBasis: regulation.statutoryLimit.legalBasis,
+        }
+      : null;
+  }, [zoneOverride, regulation]);
+
+  // ── 허용용도 + 조례 상한: 유효 용도지역이 바뀔 때마다 다시 조회한다. ──
+  useEffect(() => {
+    if (!snapshot || !effectiveZoneName) return;
+    const { pnus, siteAreaSqm } = snapshot;
+    let cancelled = false;
+
+    // 용도지역이 바뀌는 순간 이전 지역의 조례 상한·허용용도를 먼저 비운다.
+    // 안 비우면 새 조회가 실패했을 때 이전 지역 값이 남아 엉뚱한 조합으로 섞인다.
+    setOrdinanceLimit(null);
+    setAllowedUse(null);
+    setAllowedUseError("");
+
+    (async () => {
+      try {
+        const legalGfa = nationalLimitForEffectiveZone
+          ? siteAreaSqm * (nationalLimitForEffectiveZone.farMax / 100)
+          : null;
+        const gfaParam = legalGfa && legalGfa > 0 ? `&aboveGroundGfaSqm=${encodeURIComponent(legalGfa)}` : "";
+        const response = await fetch(
+          `/api/allowed-use?pnu=${encodeURIComponent(pnus[0])}&zoneName=${encodeURIComponent(effectiveZoneName)}&scenarioCode=BASE&siteAreaSqm=${encodeURIComponent(siteAreaSqm)}${gfaParam}`
+        );
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data?.message ?? "건축 가능시설 조회에 실패했습니다.");
+        if (!cancelled) {
+          setAllowedUseError("");
+          setAllowedUse({
+            facilities: data.facilities ?? [],
+            caveats: data.caveats ?? [],
+            zone: data.zone,
+            diagnostics: data.diagnostics,
+            source: data.source,
+          });
+          setOrdinanceLimit((data.ordinanceLimit as OrdinanceLimit | null) ?? null);
+        }
+        // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설과 면적 상한을 걸러낼 때 쓴다.
+        const facilities: AllowedUseFacility[] = data.facilities ?? [];
+        const allowedKeys = facilities
+          .filter(
+            (facility) =>
+              facility.decision === "ALLOWED" ||
+              facility.decision === "CONDITIONAL" ||
+              facility.decision === "REVIEW"
+          )
+          .map((facility) => facility.key);
+        // 조례가 정한 용도별 바닥면적 상한. 이게 없으면 제2종일반주거에
+        // 오피스 3,700㎡ 같은 애초에 불가능한 규모를 제안하게 된다.
+        const useLimits: Record<string, { decision: AllowedUseDecision; maxGfaSqm: number | null }> = {};
+        for (const facility of facilities) {
+          useLimits[facility.key] = {
+            decision: facility.decision,
+            maxGfaSqm: facility.maxGfaSqm ?? null,
+          };
+        }
+        try {
+          sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
+          sessionStorage.setItem("inrealtylab.step2UseLimits", JSON.stringify(useLimits));
+        } catch {
+          // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
+        }
+        // 허용용도 조회는 비동기라 ProgramChoice가 먼저 뜬다. 끝났다고 알려준다.
+        window.dispatchEvent(
+          new CustomEvent("inrealtylab:allowedUse", { detail: { keys: allowedKeys, limits: useLimits } })
+        );
+      } catch (error) {
+        if (!cancelled) setAllowedUseError(error instanceof Error ? error.message : "건축 가능시설 조회에 실패했습니다.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // nationalLimitForEffectiveZone은 zoneOverride/regulation에서 파생되는 객체라
+    // effectiveZoneName과 항상 같이 바뀐다 — 별도 의존성으로 넣으면 매 렌더 재조회된다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, effectiveZoneName]);
+
   // 국가 시행령 상한과 지자체 조례 상한 중 더 엄격한 값이 실제 상한이다.
   // 조례를 안 보면 제2종일반주거를 250%로 잡아 연면적이 25% 과대 계산된다.
   const effectiveLimit = useMemo(() => {
-    const national = regulation?.statutoryLimit;
+    const national = nationalLimitForEffectiveZone;
     if (!national) return null;
     const bcrCandidates = [national.bcrMax, ordinanceLimit?.bcrMaxPct].filter(
       (value): value is number => typeof value === "number" && value > 0
@@ -272,9 +325,11 @@ export default function SiteProgram() {
       nationalBcr: national.bcrMax,
       nationalFar: national.farMax,
     };
-  }, [regulation, ordinanceLimit]);
+  }, [nationalLimitForEffectiveZone, ordinanceLimit]);
 
-  // 조례 상한이 국가 상한보다 낮으면 STEP 3이 읽는 스냅샷도 그 값으로 덮어쓴다.
+  // 조례 상한이 국가 상한보다 낮으면, 혹은 용도지역 가정 시나리오가 켜져 있으면
+  // STEP 3이 읽는 스냅샷도 그 값으로 덮어쓴다. 가정 시나리오일 때는 실제 조회값을
+  // actualPrimaryZone에 같이 남겨 STEP 3 보고서가 착각하지 않고 경고를 띄울 수 있게 한다.
   useEffect(() => {
     if (!effectiveLimit || !snapshot) return;
     try {
@@ -283,15 +338,18 @@ export default function SiteProgram() {
         "inrealtylab.part1Snapshot",
         JSON.stringify({
           ...(previous ? JSON.parse(previous) : {}),
+          primaryZone: effectiveZoneName,
           statutoryBcrMaxPct: effectiveLimit.bcrMax,
           statutoryFarMaxPct: effectiveLimit.farMax,
           limitLegalBasis: effectiveLimit.legalBasis,
+          zoneIsOverride: !!zoneOverride,
+          actualPrimaryZone: regulation?.primaryZone ?? null,
         })
       );
     } catch {
       // 스토리지를 못 쓰면 STEP 3에서 값을 직접 입력하게 된다.
     }
-  }, [effectiveLimit, snapshot]);
+  }, [effectiveLimit, snapshot, effectiveZoneName, zoneOverride, regulation]);
 
   const statutoryCapacity = useMemo(() => {
     if (!effectiveLimit || totalArea <= 0) return null;
@@ -353,12 +411,51 @@ export default function SiteProgram() {
 
       {loading && <div className="regime-note">공공데이터를 조회하고 있습니다...</div>}
 
+      {/* ── 용도지역 가정변경 (시나리오) ── */}
+      {/* 종상향 등을 전제로 사업성을 검토하고 싶을 때 쓰는 입력. 실제 조회값은 절대
+          지우지 않고 아래에 같이 표시해, 가정과 사실을 헷갈리지 않게 한다. */}
+      <div className={`zone-override-card${zoneOverride ? " active" : ""}`}>
+        <div className="zone-override-head">
+          <span>시나리오</span>
+          <strong>용도지역 가정변경</strong>
+        </div>
+        <div className="zone-override-row">
+          <label htmlFor="zone-override-select">가정할 용도지역</label>
+          <select
+            id="zone-override-select"
+            value={zoneOverride ?? ""}
+            onChange={(event) => setZoneOverride(event.target.value || null)}
+          >
+            <option value="">실제 조회값 사용{regulation?.primaryZone ? ` (${regulation.primaryZone})` : ""}</option>
+            {ZONE_OVERRIDE_OPTIONS.map((zoneName) => (
+              <option key={zoneName} value={zoneName}>{zoneName}</option>
+            ))}
+          </select>
+          {zoneOverride && (
+            <button type="button" onClick={() => setZoneOverride(null)}>실제 조회값으로 되돌리기</button>
+          )}
+        </div>
+        {zoneOverride ? (
+          <p className="zone-override-note">
+            실제 조회된 용도지역은 <strong>{regulation?.primaryZone ?? "확인 필요"}</strong>입니다. 지금부터 아래 건폐율·용적률·개발가능
+            규모·허용용도·STEP 3 사업성은 전부 <strong>{zoneOverride}</strong>(으)로 가정했을 때의 값이며, 법적으로 확정된 용도지역이
+            아닙니다.
+          </p>
+        ) : (
+          <p className="zone-override-note muted">종상향 등 다른 용도지역을 전제로 검토하고 싶으면 여기서 선택하세요. 선택 전까지는 실제 조회값 그대로 계산합니다.</p>
+        )}
+      </div>
+
       {/* ── 법적 규제 ── */}
       {regulationError && <div className="control-error">{regulationError}</div>}
       {regulation && (
         <>
           <div className="metric-grid">
-            <div><span>주요 용도지역</span><strong>{regulation.primaryZone ?? "확인 필요"}</strong></div>
+            <div>
+              <span>주요 용도지역{zoneOverride ? " (가정)" : ""}</span>
+              <strong>{effectiveZoneName ?? "확인 필요"}</strong>
+              {zoneOverride && <small>실제 조회값 {regulation.primaryZone ?? "확인 필요"}</small>}
+            </div>
             <div>
               <span>건폐율 상한</span>
               <strong>{effectiveLimit ? formatPct(effectiveLimit.bcrMax) : "-"}</strong>
@@ -404,7 +501,7 @@ export default function SiteProgram() {
       {allowedUse && (
         <>
           <div className="metric-grid">
-            <div><span>기준 용도지역</span><strong>{regulation?.primaryZone ?? "추가확인"}</strong></div>
+            <div><span>기준 용도지역{zoneOverride ? " (가정)" : ""}</span><strong>{effectiveZoneName ?? "추가확인"}</strong></div>
             <div><span>건축 가능 용도</span><strong>{allowedUse.diagnostics.matchedFacilityCount}/{allowedUse.facilities.length}</strong></div>
             <div><span>기준일</span><strong>{allowedUse.source.baseDate}</strong></div>
           </div>
@@ -450,9 +547,10 @@ export default function SiteProgram() {
       {regulation && effectiveLimit && statutoryCapacity ? (
         <>
           <div className="capacity-basis">
-            <span>현재 계산 기준</span>
-            <strong>{regulation.primaryZone ?? regulation.statutoryLimit?.zoneName ?? "-"}</strong>
+            <span>현재 계산 기준{zoneOverride ? " (가정)" : ""}</span>
+            <strong>{effectiveZoneName ?? "-"}</strong>
             <p>대지 {formatArea(totalArea)} · BCR {formatPct(effectiveLimit.bcrMax)} · FAR {formatPct(effectiveLimit.farMax)}</p>
+            {zoneOverride && <p>실제 조회된 용도지역은 {regulation.primaryZone ?? "확인 필요"}입니다.</p>}
           </div>
 
           <div className="metric-grid capacity-metrics">
@@ -503,13 +601,22 @@ export default function SiteProgram() {
           </div>
           <div className="capacity-status-list">
             <CapacityStatus label="대지면적" status="반영" tone="ok" detail="VWorld 지적 필지" />
-            <CapacityStatus label="용도지역" status="반영" tone="ok" detail={regulation.primaryZone ?? "세부지역 확인 필요"} />
+            <CapacityStatus
+              label="용도지역"
+              status={zoneOverride ? "가정 적용" : "반영"}
+              tone={zoneOverride ? "warn" : "ok"}
+              detail={
+                zoneOverride
+                  ? `${effectiveZoneName} 가정 (실제 조회값 ${regulation.primaryZone ?? "확인 필요"})`
+                  : regulation.primaryZone ?? "세부지역 확인 필요"
+              }
+            />
             <CapacityStatus label="건축 가능시설" status={allowedUse ? "판정" : "미조회"} tone={allowedUse ? "ok" : "pending"} detail={allowedUse ? allowedUse.source.name : "판정 실패"} />
             <CapacityStatus
               label="국가 건폐율·용적률"
               status="반영"
               tone="ok"
-              detail={regulation.statutoryLimit?.legalBasis ?? "국토계획법 시행령"}
+              detail={nationalLimitForEffectiveZone?.legalBasis ?? "국토계획법 시행령"}
             />
             <CapacityStatus
               label="조례 건폐율·용적률"
