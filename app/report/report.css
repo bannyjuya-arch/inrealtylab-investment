@@ -117,7 +117,12 @@
    옆 카드 높이와 무관하게 비율을 고정해, 애초에 다시 fit할 필요를 없앤다. */
 .report-map { position: relative; align-self: start; aspect-ratio: 4 / 3; min-height: 260px; border-radius: 10px; overflow: hidden; border: 1px solid #C3CCC7; background: #F6F8F7; }
 .report-map-canvas { position: absolute; inset: 0; }
-.report-map-canvas canvas { border-radius: 10px; }
+/* 2026-09-07 #2: OpenLayers가 만드는 <canvas>는 자기 내부 픽셀 크기(width/height 속성)를
+   따로 갖는다. updateSize() 호출 시점이 살짝 어긋나면 canvas가 이전(화면용) 크기 그대로
+   남고, 인쇄용으로 줄어든 컨테이너 밖으로 넘친 부분이 overflow:hidden에 잘려나가
+   "위쪽 일부만 보이는" 모양으로 보인다. 컨테이너에 항상 꽉 차게 강제해 이 어긋남 자체를
+   화면에 안 드러나게 한다. */
+.report-map-canvas canvas { display: block !important; width: 100% !important; height: 100% !important; border-radius: 10px; }
 .report-map-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #9DA09E; }
 /* 인쇄 시 브라우저가 배경·타일을 빼버리지 않게 한다. */
 .report-map, .report-map-canvas, .report-map-canvas canvas {
