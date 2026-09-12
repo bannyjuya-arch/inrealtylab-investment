@@ -62,6 +62,13 @@ export type FinancialAssumptions = {
   exitCapRatePct: number | null;
 };
 
+// 2026-09-12: VFM(PIMAC식 PSC 대비 비용절감효과) 분석 필드는 여기서 제거했다.
+// 2026-09-10에 짜둔 코드(VfmResult·calculateVfm·FinancialCell.vfm 등)는 사용자가 PIMAC VFM
+// 표준모델 원문을 확보할 때까지 공개하지 않기로 결정(2026-09-11)했는데, app/report/page.tsx만
+// 먼저 push되고 이 파일의 타입 변경분은 push되지 않아 프로덕션 빌드가 깨졌다(타입 불일치).
+// git 히스토리에 그때의 전체 구현이 남아있으니, 공식 PIMAC 자료가 준비되면 그 커밋을 참고해
+// 다시 이어 붙이면 된다. 지금은 화면·계산 양쪽에서 VFM 관련 코드를 전부 되돌린다.
+
 export type DemandInputs = {
   publicRequiredGfa: number | null;
   commercialSupportableGfa: Partial<Record<CommercialCategoryKey, number | null>>;
