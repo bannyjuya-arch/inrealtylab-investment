@@ -125,6 +125,25 @@ function writeDemand(demand: DemandInputs) {
   }
 }
 
+// 2026-09-12: "시설별 적용 임대료" 표의 "합의된 수요시설" 필터가 DEMAND ENGINE(관리자 전용
+// 수동 GFA 입력)만 보고 있어서, STEP 2 프로그램 구성(ProgramChoice)에서 실제로 고른 상품
+// (예: 임대주택)은 이 표에 전혀 반영되지 않았다. lib/integrated-report.ts의 readCommercialAllocation이
+// 이미 DSCR·IRR 계산에는 inrealtylab.step2Program을 쓰고 있으므로 같은 키를 여기서도 읽어
+// "STEP 2에서 고른 시설"을 합의된 시설에 포함시킨다.
+function readStep2SelectedFacilityCodes(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.sessionStorage.getItem("inrealtylab.step2Program");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as { commercial?: Record<string, number> };
+    return Object.entries(parsed?.commercial ?? {})
+      .filter(([, ratioPct]) => Number(ratioPct) > 0)
+      .map(([code]) => code);
+  } catch {
+    return [];
+  }
+}
+
 type FinanceDefaultSource = {
   metricCode: string;
   value: number | null;
@@ -295,6 +314,10 @@ const initialAssumptions: FinancialAssumptions = {
   investorRequiredReturnPct: null,
   otherAnnualRevenue: null,
   exitCapRatePct: null,
+  vfmOptimismBiasPct: null,
+  vfmPscRetainedRiskPct: null,
+  vfmPppRetainedRiskPct: null,
+  vfmSocialDiscountRatePct: null,
 };
 
 function parseNumber(value: string) {
@@ -387,6 +410,7 @@ export default function ReportPage() {
   const [basementAutoApplied, setBasementAutoApplied] = useState(false);
   const [demand, setDemand] = useState<DemandInputs>(emptyDemand);
   const [demandHydrated, setDemandHydrated] = useState(false);
+  const [step2Facilities, setStep2Facilities] = useState<string[]>([]);
   const [assumptions, setAssumptions] = useState<FinancialAssumptions>(initialAssumptions);
   const [financeDefaults, setFinanceDefaults] = useState<FinanceDefaults | null>(null);
   const [financeDefaultsError, setFinanceDefaultsError] = useState("");
@@ -733,6 +757,7 @@ export default function ReportPage() {
   useEffect(() => {
     setDemand(readDemand());
     setDemandHydrated(true);
+    setStep2Facilities(readStep2SelectedFacilityCodes());
   }, []);
 
   // 복원이 끝난 뒤부터만 저장한다 — 복원 전에 써버리면 emptyDemand로 기존 값을 지운다.
@@ -942,19 +967,21 @@ export default function ReportPage() {
 
           {rent && (() => {
             // 카탈로그 전체(6~10개)를 다 보여주면 이 부지랑 무관한 시설까지 나온다.
-            // 일반 모드는 DEMAND ENGINE(관리자 전용)에 수요면적을 입력해 "합의한" 시설만
-            // 보여주고, 관리자는 다음 입력을 위해 계속 전체를 참고용으로 본다.
+            // "합의된" 시설은 두 경로 중 하나로 확정된다 — ① STEP 2 프로그램 구성(ProgramChoice)에서
+            // 실제로 고른 상품(예: 임대주택), ② 관리자가 DEMAND ENGINE에 직접 입력한 수요면적.
+            // 2026-09-12 이전에는 ②만 보고 있어서 STEP 2에서 상품을 골라도 이 표가 계속 비어 있었다.
+            const step2Selected = new Set(step2Facilities);
             const agreedFacilities = isAdmin
               ? rent.facilities
               : rent.facilities.filter((facility) => {
                   const gfa = demand.commercialSupportableGfa[facility.facilityCode as CommercialCategoryKey];
-                  return typeof gfa === "number" && gfa > 0;
+                  return (typeof gfa === "number" && gfa > 0) || step2Selected.has(facility.facilityCode);
                 });
             return (
             <>
               {!isAdmin && agreedFacilities.length === 0 && (
                 <div className="report-note" style={{ marginBottom: 10 }}>
-                  아직 합의된 수요시설이 없습니다. (관리자 모드에서 시설별 수요면적을 입력하면 여기 표시됩니다.)
+                  아직 합의된 수요시설이 없습니다. (STEP 2에서 시설을 선택하거나, 관리자 모드에서 시설별 수요면적을 입력하면 여기 표시됩니다.)
                 </div>
               )}
               <table className="report-table"><thead><tr><th>시설</th><th>적용 임대료 원/㎡·월</th><th>지역</th><th>출처</th></tr></thead><tbody>
@@ -1056,6 +1083,16 @@ export default function ReportPage() {
             {structurePolicy?.policy.usesExitCapRate && (
               <Field label="Exit Cap Rate %" value={assumptions.exitCapRatePct} onChange={(v) => setAssumption("exitCapRatePct", v)} />
             )}
+          </div>
+          <div className="report-form-grid" style={{ marginTop: 12 }}>
+            <Field label="VFM 낙관적편향 % (기본 15)" value={assumptions.vfmOptimismBiasPct} onChange={(v) => setAssumption("vfmOptimismBiasPct", v)} />
+            <Field label="VFM PSC 보유위험 % (기본 10)" value={assumptions.vfmPscRetainedRiskPct} onChange={(v) => setAssumption("vfmPscRetainedRiskPct", v)} />
+            <Field label="VFM PPP 보유위험 % (기본 5)" value={assumptions.vfmPppRetainedRiskPct} onChange={(v) => setAssumption("vfmPppRetainedRiskPct", v)} />
+            <Field label="사회적 할인율 % (기본 4.5)" value={assumptions.vfmSocialDiscountRatePct} onChange={(v) => setAssumption("vfmSocialDiscountRatePct", v)} />
+          </div>
+          <div className="report-note" style={{ marginTop: 8 }}>
+            VFM(정부 직접시행 대비 비용절감효과) 가정치 4종은 아직 DB 기준값이 없어 비워두면 잠정 기본값으로 계산됩니다.
+            대외 제출 자료로 쓰기 전에는 반드시 직접 입력해 확정해 주세요.
           </div>
           {structurePolicy?.policy.usesExitCapRate && (
             <div className="report-note" style={{ marginTop: 8 }}>
@@ -1167,6 +1204,14 @@ export default function ReportPage() {
 
         <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "참고" : "적용"}</span><br /><strong>부채상환비율 (DSCR)</strong></div><span className="report-source">가능 ≥ {analysis.dscrPassMin.toFixed(2)} · 조건부 1.00 이상</span></div><Matrix mode="BTO" analysis={analysis} /></div>
         <div className="report-section"><div className="report-section-head"><div><span>{structurePolicy?.policy.structureGroup === "REIT" ? "적용" : "참고"}</span><br /><strong>사업수익률 (IRR)</strong></div><span className="report-source">가능 ≥ 6.5% · 조건부 4.50% 이상{assumptions.investorRequiredReturnPct ? ` · 출자자 요구 ${assumptions.investorRequiredReturnPct}%` : ""}</span></div><Matrix mode="REITS" analysis={analysis} /></div>
+        <div className="report-section"><div className="report-section-head"><div><span>참고</span><br /><strong>VFM (정부 직접시행 대비 비용절감효과)</strong></div><span className="report-source">PSC 대비 VFM {'>'} 0% 이면 민간투자가 재정사업보다 유리{(analysis.financialMatrix[0]?.vfm.basis === "FALLBACK") ? " · 가정치 미확정(잠정 기본값 적용)" : ""}</span></div><Matrix mode="VFM" analysis={analysis} />
+          <div className="report-note" style={{ marginTop: 8 }}>
+            국공유지 비소유형 사업구조 특성상 정부는 초기 재정을 투입하지 않고 매년 토지사용료를 받으므로,
+            PPP 대안의 정부 순비용은 대개 음수(순수입)로 계산됩니다 — "정부가 돈을 번다"가 아니라 PSC 대비
+            재정부담이 그만큼 작다는 뜻입니다. VFM 가정치(낙관적편향·보유위험·할인율)는 ASSUMPTIONS에서 직접 입력하지
+            않으면 잠정 기본값으로 계산되며, 공식 확정치가 아닙니다.
+          </div>
+        </div>
 
         {structurePolicy && structurePolicy.unmodelled.length > 0 && (
           <div className="report-warning">
@@ -1207,6 +1252,19 @@ function dscrGapTitle(cell: FinancialCell, dscrPassMin: number) {
   return `연간 사업 현금흐름 ${formatWon(cell.annualProjectCashflow)} · 원리금상환액 ${formatWon(cell.annualDebtService)} · ${shortfallText}`;
 }
 
-function Matrix({ mode, analysis }: { mode: "BTO" | "REITS"; analysis: ReturnType<typeof buildIntegratedAnalysis> }) {
-  return <table className="report-table"><thead><tr><th>개발규모</th>{CONCESSION_TERMS.map((term) => <th key={term}>{term}년</th>)}</tr></thead><tbody>{DEVELOPMENT_SCENARIOS.map((scenario) => <tr key={scenario.key}><td>{scenario.label}</td>{CONCESSION_TERMS.map((term) => { const cell = analysis.financialMatrix.find((item) => item.scenarioKey === scenario.key && item.term === term); if (!cell) return <td key={term}>-</td>; const status = mode === "BTO" ? cell.btoBotStatus : cell.reitsStatus; return <td key={term} title={mode === "BTO" ? dscrGapTitle(cell, analysis.dscrPassMin) : undefined}><span className="matrix-value">{mode === "BTO" ? (cell.dscr?.toFixed(2) ?? "-") : irrText(cell.projectIrr)}</span><span className={`report-status ${statusTone(status)}`}>{statusLabel(status)}</span>{mode === "REITS" && cell.investorReturnSatisfied !== null && <div className="matrix-sub">출자자 {cell.investorReturnSatisfied ? "충족" : "미충족"}</div>}</td>; })}</tr>)}</tbody></table>;
+function vfmStatusValue(eligible: boolean | null): "ELIGIBLE" | "NOT_ELIGIBLE" | "REVIEW" {
+  if (eligible === null) return "REVIEW";
+  return eligible ? "ELIGIBLE" : "NOT_ELIGIBLE";
+}
+
+function vfmGapTitle(cell: FinancialCell) {
+  const { pscPresentValue, pppNetCostPresentValue, vfmAmount } = cell.vfm;
+  if (pscPresentValue === null || pppNetCostPresentValue === null || vfmAmount === null) {
+    return "총사업비 등 입력이 부족해 VFM을 계산하지 못했습니다.";
+  }
+  return `PSC(정부 직접시행) ${formatWon(pscPresentValue)} · PPP 대안 정부 순비용 ${formatWon(pppNetCostPresentValue)} · VFM ${formatWon(vfmAmount)}`;
+}
+
+function Matrix({ mode, analysis }: { mode: "BTO" | "REITS" | "VFM"; analysis: ReturnType<typeof buildIntegratedAnalysis> }) {
+  return <table className="report-table"><thead><tr><th>개발규모</th>{CONCESSION_TERMS.map((term) => <th key={term}>{term}년</th>)}</tr></thead><tbody>{DEVELOPMENT_SCENARIOS.map((scenario) => <tr key={scenario.key}><td>{scenario.label}</td>{CONCESSION_TERMS.map((term) => { const cell = analysis.financialMatrix.find((item) => item.scenarioKey === scenario.key && item.term === term); if (!cell) return <td key={term}>-</td>; const status = mode === "BTO" ? cell.btoBotStatus : mode === "REITS" ? cell.reitsStatus : vfmStatusValue(cell.vfm.eligible); return <td key={term} title={mode === "BTO" ? dscrGapTitle(cell, analysis.dscrPassMin) : mode === "VFM" ? vfmGapTitle(cell) : undefined}><span className="matrix-value">{mode === "BTO" ? (cell.dscr?.toFixed(2) ?? "-") : mode === "REITS" ? irrText(cell.projectIrr) : formatPercent(cell.vfm.vfmRatioPct)}</span><span className={`report-status ${statusTone(status)}`}>{statusLabel(status)}</span>{mode === "REITS" && cell.investorReturnSatisfied !== null && <div className="matrix-sub">출자자 {cell.investorReturnSatisfied ? "충족" : "미충족"}</div>}</td>; })}</tr>)}</tbody></table>;
 }
