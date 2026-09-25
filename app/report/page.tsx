@@ -18,6 +18,7 @@ import {
 } from "../../lib/integrated-report";
 import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
 import ReportMap from "./report-map";
+import DownloadGate, { hasSubmittedReportLead } from "./download-gate";
 import "./report.css";
 
 type Part1Snapshot = {
@@ -425,6 +426,16 @@ export default function ReportPage() {
   // 계산 결과(판정 매트릭스 등)만 보인다.
   const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  // 2026-09-25: 비로그인 방문자는 PDF 출력 전에 베타 사용 신청 정보를 남긴다.
+  const [leadGateOpen, setLeadGateOpen] = useState(false);
+
+  function handlePrintClick() {
+    if (isAdmin || hasSubmittedReportLead()) {
+      window.print();
+      return;
+    }
+    setLeadGateOpen(true);
+  }
 
   useEffect(() => {
     let supabase;
@@ -849,7 +860,7 @@ export default function ReportPage() {
         <div><strong>인리얼티 통합 검토보고서</strong><div className="report-source">현황분석 → 시설구성 → 사업성 판정{isAdmin ? " · 관리자 모드" : ""}</div></div>
         <div className="report-toolbar-actions">
           <button className="report-btn" onClick={() => window.history.back()}>이전</button>
-          <button className="report-btn primary" onClick={() => window.print()}>인쇄 / PDF</button>
+          <button className="report-btn primary" onClick={handlePrintClick}>인쇄 / PDF</button>
           {authReady && (isAdmin
             ? <button className="report-btn" onClick={handleAdminLogout}>로그아웃</button>
             : <button
@@ -862,6 +873,18 @@ export default function ReportPage() {
               </button>)}
         </div>
       </div>
+
+      <DownloadGate
+        open={leadGateOpen}
+        onClose={() => setLeadGateOpen(false)}
+        onDone={() => {
+          setLeadGateOpen(false);
+          // 모달이 화면에서 사라진 뒤 인쇄 대화상자를 연다.
+          window.setTimeout(() => window.print(), 150);
+        }}
+        address={address}
+        pnus={snapshot.pnus ?? ownership.map((item) => item.pnu)}
+      />
 
       <section className="report-page">
         <div className="report-kicker">01 · 대지 조건</div>

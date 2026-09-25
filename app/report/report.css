@@ -206,3 +206,36 @@
 .report-conditions strong { font-size: 14.5px; font-weight: 600; color: #26292B; font-variant-numeric: tabular-nums; }
 .report-conditions-back { margin-left: auto; font-size: 13.5px; color: #5F6260; }
 .report-conditions-back:hover { color: #14453A; text-decoration: underline; }
+
+/* 2026-09-25: PDF 출력 전 베타 사용 신청 모달 */
+.lead-gate-backdrop {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; background: rgba(20, 69, 58, 0.45);
+}
+.lead-gate {
+  width: 100%; max-width: 560px; max-height: calc(100vh - 32px); overflow-y: auto;
+  background: #FFFFFF; border-radius: 12px; padding: 28px 28px 22px;
+  border: 1px solid #DFE4E1; color: #1F2A26;
+}
+.lead-gate-kicker { font-size: 12px; font-weight: 700; letter-spacing: .06em; color: #3E7D65; }
+.lead-gate h2 { margin: 6px 0 8px; font-size: 20px; font-weight: 700; color: #14453A; line-height: 1.4; }
+.lead-gate-lead { margin: 0 0 18px; font-size: 14px; line-height: 1.6; color: #5F6260; }
+.lead-gate-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.lead-gate-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: #5F6260; }
+.lead-gate-grid input, .lead-gate-grid select {
+  padding: 9px 10px; font-size: 14px; border: 1px solid #C3CCC7; border-radius: 8px;
+  background: #FFFFFF; color: #1F2A26; font-family: inherit;
+}
+.lead-gate-grid input:focus, .lead-gate-grid select:focus { outline: 2px solid #3E7D65; outline-offset: -1px; border-color: #3E7D65; }
+.lead-gate-consent { margin-top: 16px; padding-top: 14px; border-top: 1px solid #DFE4E1; }
+.lead-gate-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; color: #1F2A26; cursor: pointer; }
+.lead-gate-check input { margin-top: 3px; accent-color: #14453A; }
+.lead-gate-fine { margin: 6px 0 12px 24px; font-size: 12px; line-height: 1.55; color: #5F6260; }
+.lead-gate-error { margin-top: 10px; padding: 9px 11px; border-radius: 8px; background: #FBEDE9; color: #9A3B26; font-size: 13px; }
+.lead-gate-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.lead-gate-actions .report-btn:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 560px) {
+  .lead-gate { padding: 22px 18px 18px; }
+  .lead-gate-grid { grid-template-columns: 1fr; }
+}
