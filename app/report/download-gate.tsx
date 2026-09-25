@@ -1,12 +1,11 @@
 "use client";
 
 // 2026-09-25: 보고서 "인쇄 / PDF" 버튼을 누르면 베타 사용 신청 정보를 먼저 받는다.
-// - 제출 내용은 Supabase report_download_lead 테이블에 저장 (anon은 INSERT만 가능, 조회 불가)
+// - 제출 내용은 /api/report-lead 가 report_download_lead 테이블에 저장하고 알림 메일을 보낸다
 // - 같은 브라우저에서 한 번 제출하면 이후에는 폼 없이 바로 인쇄 (localStorage)
 // - 관리자 로그인 상태에서는 폼을 건너뛴다 (page.tsx에서 분기)
 
 import { useEffect, useState, type FormEvent } from "react";
-import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
 
 const SUBMITTED_KEY = "inrealtylab.reportLeadSubmitted";
 
@@ -99,10 +98,12 @@ export default function DownloadGate({ open, onClose, onDone, address, pnus }: P
     };
 
     try {
-      const { error: insertError } = await getSupabaseBrowserClient()
-        .from("report_download_lead")
-        .insert(row);
-      if (insertError) throw insertError;
+      const response = await fetch("/api/report-lead", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(row),
+      });
+      if (!response.ok) throw new Error(`report-lead ${response.status}`);
       markSubmitted();
       setSubmitting(false);
       onDone();
