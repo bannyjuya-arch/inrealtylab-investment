@@ -10,16 +10,18 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.7.0",
-    "@prisma/client": "^7.7.0",
-    "@supabase/supabase-js": "^2.103.3",
-    "next": "16.2.4",
-    "pg": "^8.20.0",
-    "prisma": "^7.7.0",
-    "puppeteer": "^24.41.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "zod": "^4.3.6"
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "@sparticuz/chromium": "~148.0.0",
+    "@supabase/supabase-js": "^2.117.2",
+    "next": "16.3.6",
+    "pg": "^8.23.0",
+    "prisma": "^7.10.0",
+    "puppeteer": "^24.43.1",
+    "puppeteer-core": "~24.43.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -27,7 +29,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.4",
+    "eslint-config-next": "16.3.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

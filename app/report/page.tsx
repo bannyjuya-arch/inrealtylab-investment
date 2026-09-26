@@ -18,7 +18,7 @@ import {
 } from "../../lib/integrated-report";
 import { getSupabaseBrowserClient } from "../../lib/supabase-browser";
 import ReportMap from "./report-map";
-import DownloadGate, { hasSubmittedReportLead } from "./download-gate";
+import DownloadGate from "./download-gate";
 import "./report.css";
 
 type Part1Snapshot = {
@@ -427,10 +427,11 @@ export default function ReportPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   // 2026-09-25: 비로그인 방문자는 PDF 출력 전에 베타 사용 신청 정보를 남긴다.
+  // 2026-09-26: 방문자는 인쇄 대신 신청한 이메일로 PDF를 받는다. 관리자만 바로 인쇄한다.
   const [leadGateOpen, setLeadGateOpen] = useState(false);
 
   function handlePrintClick() {
-    if (isAdmin || hasSubmittedReportLead()) {
+    if (isAdmin) {
       window.print();
       return;
     }
@@ -860,7 +861,7 @@ export default function ReportPage() {
         <div><strong>인리얼티 통합 검토보고서</strong><div className="report-source">현황분석 → 시설구성 → 사업성 판정{isAdmin ? " · 관리자 모드" : ""}</div></div>
         <div className="report-toolbar-actions">
           <button className="report-btn" onClick={() => window.history.back()}>이전</button>
-          <button className="report-btn primary" onClick={handlePrintClick}>인쇄 / PDF</button>
+          <button className="report-btn primary" onClick={handlePrintClick}>{isAdmin ? "인쇄 / PDF" : "PDF 이메일로 받기"}</button>
           {authReady && (isAdmin
             ? <button className="report-btn" onClick={handleAdminLogout}>로그아웃</button>
             : <button
@@ -874,17 +875,13 @@ export default function ReportPage() {
         </div>
       </div>
 
-      <DownloadGate
-        open={leadGateOpen}
-        onClose={() => setLeadGateOpen(false)}
-        onDone={() => {
-          setLeadGateOpen(false);
-          // 모달이 화면에서 사라진 뒤 인쇄 대화상자를 연다.
-          window.setTimeout(() => window.print(), 150);
-        }}
-        address={address}
-        pnus={snapshot.pnus ?? ownership.map((item) => item.pnu)}
-      />
+      {leadGateOpen && (
+        <DownloadGate
+          onClose={() => setLeadGateOpen(false)}
+          address={address}
+          pnus={snapshot.pnus ?? ownership.map((item) => item.pnu)}
+        />
+      )}
 
       <section className="report-page">
         <div className="report-kicker">01 · 대지 조건</div>
