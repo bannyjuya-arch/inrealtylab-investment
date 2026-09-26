@@ -13,10 +13,9 @@ import { renderReportPdf } from "../../../lib/report-pdf";
 // 필요한 환경변수 (Vercel > Settings > Environment Variables)
 //   RESEND_API_KEY    : Resend에서 발급한 API 키 (필수, 없으면 보고서 메일을 보낼 수 없다)
 //   LEAD_NOTIFY_TO    : 알림 받을 주소, 쉼표로 여러 개 (기본 ceo@inrealtylab.com)
-//   LEAD_NOTIFY_FROM  : 보내는 주소 (기본 "INRealtyLab <onboarding@resend.dev>")
-//                       onboarding@resend.dev는 Resend 계정 주인에게만 보낼 수 있으므로,
-//                       방문자에게 보내려면 inrealtylab.com 도메인을 Resend에서 인증한 뒤
-//                       "INRealtyLab <noreply@inrealtylab.com>" 등으로 바꿔야 한다.
+//   LEAD_NOTIFY_FROM  : 보내는 주소 (기본 "INRealtyLab <noreply@inrealtylab.com>")
+//                       inrealtylab.com은 2026-09-26 Resend 도메인 인증 완료(Cloudflare DNS).
+//                       인증되지 않은 도메인 주소로 바꾸면 Resend가 403으로 거절한다.
 
 export const dynamic = "force-dynamic";
 // 크롬 기동 + PDF 생성에 수 초가 걸린다.
@@ -77,7 +76,7 @@ function escapeHtml(value: string) {
 }
 
 function mailFrom() {
-  return process.env.LEAD_NOTIFY_FROM?.trim() || "INRealtyLab <onboarding@resend.dev>";
+  return process.env.LEAD_NOTIFY_FROM?.trim() || "INRealtyLab <noreply@inrealtylab.com>";
 }
 
 // 실패하면 Resend가 돌려준 사유를 함께 돌려준다. 베타 기간에는 화면에 그대로 보여 원인을 바로 찾는다.
