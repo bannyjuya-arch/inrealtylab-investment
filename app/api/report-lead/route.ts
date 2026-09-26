@@ -80,17 +80,25 @@ function mailFrom() {
   return process.env.LEAD_NOTIFY_FROM?.trim() || "INRealtyLab <onboarding@resend.dev>";
 }
 
-async function sendResend(apiKey: string, payload: Record<string, unknown>) {
+// 실패하면 Resend가 돌려준 사유를 함께 돌려준다. 베타 기간에는 화면에 그대로 보여 원인을 바로 찾는다.
+async function sendResend(apiKey: string, payload: Record<string, unknown>): Promise<{ ok: boolean; detail?: string }> {
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    console.error("[report-lead] 메일 발송 실패", response.status, await response.text().catch(() => ""));
-    return false;
+    const body = await response.text().catch(() => "");
+    console.error("[report-lead] 메일 발송 실패", response.status, body);
+    let message = body;
+    try {
+      message = (JSON.parse(body) as { message?: string }).message || body;
+    } catch {
+      // JSON이 아니면 본문 그대로
+    }
+    return { ok: false, detail: `Resend ${response.status}: ${message}`.slice(0, 300) };
   }
-  return true;
+  return { ok: true };
 }
 
 function reportFileName(address: string | null) {
@@ -162,7 +170,7 @@ async function sendNotification(apiKey: string, row: Record<string, unknown>) {
       <p style="font-size:12px;color:#5F6260;margin-top:18px">Supabase Table Editor → report_download_lead 에서 상태(status)를 관리하세요.</p>
     </div>`;
 
-  const ok = await sendResend(apiKey, {
+  const { ok } = await sendResend(apiKey, {
     from: mailFrom(),
     to,
     reply_to: typeof row.email === "string" ? row.email : undefined,
@@ -200,7 +208,10 @@ export async function POST(request: Request) {
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) {
     console.error("[report-lead] RESEND_API_KEY 미설정 — 보고서 메일을 보낼 수 없습니다.");
-    return NextResponse.json({ ok: false, error: "지금은 보고서 메일을 보낼 수 없습니다. 잠시 후 다시 시도해 주세요." }, { status: 503 });
+    return NextResponse.json(
+      { ok: false, reason: "mail_not_configured", error: "지금은 보고서 메일을 보낼 수 없습니다. 잠시 후 다시 시도해 주세요." },
+      { status: 503 },
+    );
   }
 
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
@@ -213,7 +224,15 @@ export async function POST(request: Request) {
     pdf = await renderReportPdf(reportHtml);
   } catch (error) {
     console.error("[report-lead] PDF 생성 실패", error);
-    return NextResponse.json({ ok: false, error: "보고서 PDF를 만들지 못했습니다. 잠시 후 다시 시도해 주세요." }, { status: 502 });
+    return NextResponse.json(
+      {
+        ok: false,
+        reason: "pdf_failed",
+        detail: String(error instanceof Error ? error.message : error).slice(0, 300),
+        error: "보고서 PDF를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      },
+      { status: 502 },
+    );
   }
 
   const pnus = Array.isArray(body.pnus)
@@ -246,17 +265,26 @@ export async function POST(request: Request) {
   });
   if (!insert.ok) {
     console.error("[report-lead] 저장 실패", insert.status, await insert.text().catch(() => ""));
-    return NextResponse.json({ ok: false, error: "저장 중 문제가 생겼습니다." }, { status: 502 });
+    return NextResponse.json({ ok: false, reason: "save_failed", error: "저장 중 문제가 생겼습니다." }, { status: 502 });
   }
 
-  let delivered = false;
+  let delivery: { ok: boolean; detail?: string } = { ok: false };
   try {
-    delivered = await sendReport(apiKey, row, pdf);
+    delivery = await sendReport(apiKey, row, pdf);
   } catch (error) {
     console.error("[report-lead] 보고서 메일 예외", error);
+    delivery = { ok: false, detail: String(error instanceof Error ? error.message : error).slice(0, 300) };
   }
-  if (!delivered) {
-    return NextResponse.json({ ok: false, error: "보고서 메일을 보내지 못했습니다. 이메일 주소를 확인하고 다시 시도해 주세요." }, { status: 502 });
+  if (!delivery.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        reason: "mail_rejected",
+        detail: delivery.detail,
+        error: "보고서 메일을 보내지 못했습니다. 이메일 주소를 확인하고 다시 시도해 주세요.",
+      },
+      { status: 502 },
+    );
   }
 
   let notify = "failed";

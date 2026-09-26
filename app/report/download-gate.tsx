@@ -122,10 +122,14 @@ export default function DownloadGate({ onClose, address, pnus }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(row),
       });
-      const result = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      const result = (await response.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; reason?: string; detail?: string }
+        | null;
       if (!response.ok || !result?.ok) {
         setSubmitting(false);
-        setError(result?.error || "보고서를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.");
+        // 베타 기간: 실패 단계(reason)와 사유(detail)를 함께 보여 원인을 바로 찾는다.
+        const code = [result?.reason ?? `HTTP ${response.status}`, result?.detail].filter(Boolean).join(" · ");
+        setError(`${result?.error || "보고서를 보내지 못했습니다. 잠시 후 다시 시도해 주세요."} (${code})`);
         return;
       }
       saveProfile({ name, email, organization, customerType, reviewTiming, phone });
