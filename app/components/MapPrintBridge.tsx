@@ -11,8 +11,9 @@ function parseTransform(transform: string) {
   return values.length === 6 && values.every(Number.isFinite) ? values : null;
 }
 
-function captureOpenLayersMap() {
-  const mapElement = document.querySelector<HTMLElement>(".map-canvas");
+// 보고서 메일 발송(report-snapshot)에서도 같은 방식으로 지도를 이미지로 굳힌다.
+export function captureOpenLayersMap(selector = ".map-canvas") {
+  const mapElement = document.querySelector<HTMLElement>(selector);
   if (!mapElement) return null;
 
   const width = Math.max(1, Math.round(mapElement.clientWidth));
