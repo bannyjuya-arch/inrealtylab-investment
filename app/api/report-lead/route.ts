@@ -205,7 +205,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "보고서 내용을 읽지 못했습니다. 새로고침 후 다시 시도해 주세요." }, { status: 400 });
   }
 
-  const apiKey = process.env.RESEND_API_KEY?.trim();
+  // 붙여넣을 때 따옴표가 같이 들어가는 경우가 있어 벗겨낸다.
+  const apiKey = process.env.RESEND_API_KEY?.trim().replace(/^["']+|["']+$/g, "");
   if (!apiKey) {
     console.error("[report-lead] RESEND_API_KEY 미설정 — 보고서 메일을 보낼 수 없습니다.");
     return NextResponse.json(
@@ -280,7 +281,10 @@ export async function POST(request: Request) {
       {
         ok: false,
         reason: "mail_rejected",
-        detail: delivery.detail,
+        // 401이면 서버가 들고 있는 키의 앞 6글자·길이를 함께 보여 Resend 대시보드의 키와 대조한다.
+        detail: delivery.detail?.startsWith("Resend 401")
+          ? `${delivery.detail} [key ${apiKey.slice(0, 6)}… len ${apiKey.length}]`
+          : delivery.detail,
         error: "보고서 메일을 보내지 못했습니다. 이메일 주소를 확인하고 다시 시도해 주세요.",
       },
       { status: 502 },
