@@ -8,7 +8,7 @@ import { renderReportPdf } from "../../../lib/report-pdf";
 // 1) 방문자 화면에서 굳힌 보고서 HTML(report-snapshot.ts)을 헤드리스 크롬으로 PDF 생성
 // 2) report_download_lead 테이블에 저장 (RLS: anon은 INSERT만 가능)
 // 3) 신청자 이메일로 PDF 첨부 메일 발송 — 실패하면 오류로 돌려 다시 시도하게 한다
-// 4) 관리자에게 새 신청 알림 메일 발송 — 실패해도 신청은 막지 않는다
+// 4) 관리자에게 새 신청 알림 메일 발송(같은 PDF 첨부) — 실패해도 신청은 막지 않는다
 //
 // 필요한 환경변수 (Vercel > Settings > Environment Variables)
 //   RESEND_API_KEY    : Resend에서 발급한 API 키 (필수, 없으면 보고서 메일을 보낼 수 없다)
@@ -132,7 +132,7 @@ async function sendReport(apiKey: string, row: Record<string, unknown>, pdf: Buf
   });
 }
 
-async function sendNotification(apiKey: string, row: Record<string, unknown>) {
+async function sendNotification(apiKey: string, row: Record<string, unknown>, pdf: Buffer) {
   const to = (process.env.LEAD_NOTIFY_TO?.trim() || "ceo@inrealtylab.com")
     .split(",")
     .map((item) => item.trim())
@@ -156,7 +156,7 @@ async function sendNotification(apiKey: string, row: Record<string, unknown>) {
     <div style="font-family:Pretendard,Apple SD Gothic Neo,Malgun Gothic,sans-serif;color:#1F2A26">
       <p style="font-size:12px;letter-spacing:.06em;color:#3E7D65;font-weight:700;margin:0">INREALTYLAB · 베타 사용 신청</p>
       <h2 style="color:#14453A;margin:6px 0 16px">새 보고서 PDF 신청이 들어왔습니다</h2>
-      <p style="font-size:13px;color:#5F6260;margin:0 0 12px">신청자 이메일로 보고서 PDF를 보냈습니다.</p>
+      <p style="font-size:13px;color:#5F6260;margin:0 0 12px">신청자 이메일로 보고서 PDF를 보냈습니다. 같은 PDF를 첨부합니다.</p>
       <table style="border-collapse:collapse;font-size:14px">
         ${rows
           .map(([label, value]) =>
@@ -175,6 +175,12 @@ async function sendNotification(apiKey: string, row: Record<string, unknown>) {
     reply_to: typeof row.email === "string" ? row.email : undefined,
     subject: `[베타 신청] ${row.organization ?? ""} · ${row.name ?? ""} (${row.customer_type ?? ""})`,
     html,
+    attachments: [
+      {
+        filename: reportFileName(typeof row.site_address === "string" ? row.site_address : null),
+        content: pdf.toString("base64"),
+      },
+    ],
   });
   return ok ? "sent" : "failed";
 }
@@ -289,7 +295,7 @@ export async function POST(request: Request) {
 
   let notify = "failed";
   try {
-    notify = await sendNotification(apiKey, row);
+    notify = await sendNotification(apiKey, row, pdf);
   } catch (error) {
     console.error("[report-lead] 알림 메일 예외", error);
   }
