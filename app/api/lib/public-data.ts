@@ -65,7 +65,8 @@ export async function fetchPublicDataXml(
 
   const resultCode = xmlTag(raw, "resultCode") || xmlTag(raw, "returnReasonCode");
   const resultMsg = xmlTag(raw, "resultMsg") || xmlTag(raw, "returnAuthMsg") || xmlTag(raw, "errMsg");
-  if (resultCode && !/^(00|0000|0)$/.test(resultCode)) {
+  // 국토부 실거래(RTMS) 신규 API는 정상 응답을 "000"으로 준다. 0으로만 된 코드는 모두 정상으로 본다.
+  if (resultCode && !/^0+$/.test(resultCode)) {
     throw new Error(`공공데이터포털 오류 ${resultCode}${resultMsg ? `: ${resultMsg}` : ""}`);
   }
   if (/SERVICE_(?:ACCESS_DENIED|KEY_IS_NOT_REGISTERED|KEY_IS_NULL)|등록되지 않은 인증키|인증키/i.test(raw)) {
