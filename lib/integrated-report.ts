@@ -179,6 +179,8 @@ export type IntegratedAnalysis = {
   totalCommercialSupportableGfa: number | null;
   fullDemandGfa: number | null;
   annualLandFee: number | null;
+  /** 연 토지사용료 요율(공시지가 대비 %). STEP 2에서 3, 4, 5% 중 선택. 선택이 없으면 5%. */
+  landFeeRatePct: number;
   capacities: ScenarioCapacity[];
   financialMatrix: FinancialCell[];
   financeBasis: FinanceBasis;
@@ -348,6 +350,17 @@ function readFacilityConstructionCost(facilityCode: string) {
 }
 
 /** 사용자가 화면에서 직접 고른 금리. 고르지 않았으면 null을 돌려줘야 DB 기준값이 쓰인다. */
+function readLandFeeRatePct(): number {
+  if (typeof window === "undefined") return 5;
+  try {
+    const raw = window.sessionStorage.getItem("inrealtylab.step2Structure");
+    const value = raw ? Number((JSON.parse(raw) as { landFeeRatePct?: number }).landFeeRatePct) : NaN;
+    return [3, 4, 5].includes(value) ? value : 5;
+  } catch {
+    return 5;
+  }
+}
+
 function readSelectedPfRatePct(): number | null {
   if (typeof window === "undefined") return null;
   try {
@@ -529,7 +542,10 @@ export function buildIntegratedAnalysis(input: {
   const basementRatio = nonNegative(input.assumptions.basementRatioPct);
   const costPerSqm = nonNegative(input.assumptions.constructionCostPerSqm);
   const landValue = nonNegative(input.officialLandValue);
-  const annualLandFee = landValue === null ? null : landValue * 0.05;
+  // 2026-11-17: 5% 고정에서 STEP 2 선택 요율(3, 4, 5%)로 변경. 주거 사업은 5%를 적용하면
+  // 토지사용료가 순영업이익을 거의 전부 차지해 현금흐름이 음수가 되고 IRR이 산출되지 않았다.
+  const landFeeRatePct = readLandFeeRatePct();
+  const annualLandFee = landValue === null ? null : landValue * (landFeeRatePct / 100);
   const linkedPart1Scenarios = readLinkedPart1Scenarios();
 
   const capacities: ScenarioCapacity[] = DEVELOPMENT_SCENARIOS.map((scenario, index) => {
@@ -760,6 +776,7 @@ export function buildIntegratedAnalysis(input: {
     totalCommercialSupportableGfa: commercialSupportableGfa,
     fullDemandGfa,
     annualLandFee,
+    landFeeRatePct,
     capacities,
     financialMatrix,
     financeBasis: {

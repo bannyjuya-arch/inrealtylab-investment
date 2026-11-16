@@ -20,7 +20,17 @@ export type StructureSelection = {
   concessionType: ConcessionType;
   vehicle: Vehicle;
   publicContributionPct: number;
+  /** 2026-11-17: 연 토지사용료 = 공시지가 총액 × 이 요율. 3, 4, 5% 중 선택. */
+  landFeeRatePct: LandFeeRate;
 };
+
+type LandFeeRate = 3 | 4 | 5;
+
+const LAND_FEE_RATES: Array<{ key: LandFeeRate; title: string; desc: string }> = [
+  { key: 3, title: "3%", desc: "주거용 적용 기준. 국유재산 주거용 법정 하한(2~2.5% 이상)보다 보수적으로 잡은 값" },
+  { key: 4, title: "4%", desc: "중간값. 주거와 비주거가 섞인 복합 프로그램" },
+  { key: 5, title: "5%", desc: "국유재산법 시행령 제29조 기본 요율(1천분의 50 이상)" },
+];
 
 const DEFAULT_SELECTION: StructureSelection = {
   landRight: "CONCESSION",
@@ -29,6 +39,7 @@ const DEFAULT_SELECTION: StructureSelection = {
   // 2026-09-06: STEP 2 프로그램 구성의 균형형 기준(BASE_PUBLIC_PCT, ProgramChoice.tsx 참고 —
   // 규모 시나리오 GAP 10%p)과 맞춰 기본 공공기여 비율도 15%에서 10%로 낮췄다.
   publicContributionPct: 10,
+  landFeeRatePct: 3,
 };
 
 const LAND_RIGHTS: Array<{ key: LandRight; title: string; desc: string }> = [
@@ -203,6 +214,31 @@ export default function StructureChoice() {
         <p className="choice-hint">
           여기서 고른 값에 따라 STEP 3 현금흐름이 갈라집니다 — 리츠는 배당가능이익 90% 배당 요건과 배당 소득공제 법인세, 신탁은 신탁보수와 수익권 배분 구조가 반영됩니다.
         </p>
+      </div>
+
+      {/* ── 토지사용료 요율 (2026-11-17) ── */}
+      <div className="choice-block">
+        <div className="choice-head">
+          <strong>토지사용료 요율</strong>
+          <em className="choice-default">공시지가 대비, 기본값 3%</em>
+        </div>
+        <p className="choice-hint">연 토지사용료 = 개별공시지가 × 대지면적 × 요율. 사업성 판정의 현금흐름에서 매년 차감됩니다.</p>
+        <div className="choice-grid three">
+          {LAND_FEE_RATES.map((option) => (
+            <button
+              type="button"
+              key={option.key}
+              className={`choice-card${selection.landFeeRatePct === option.key ? " selected" : ""}`}
+              onClick={() => setSelection((current) => ({ ...current, landFeeRatePct: option.key }))}
+            >
+              <span className="choice-card-head">
+                <i className="choice-radio" />
+                <strong>{option.title}</strong>
+              </span>
+              <span className="choice-desc">{option.desc}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── 공공기여 비율 ── */}
