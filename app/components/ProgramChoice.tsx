@@ -83,12 +83,71 @@ const RECOMMENDED_SCENARIO = "BASE";
 type UseLimit = { decision: "ALLOWED" | "CONDITIONAL" | "PROHIBITED" | "REVIEW"; maxGfaSqm: number | null };
 type UseLimits = Record<string, UseLimit>;
 
+type DemandScenarioCode = "CONSERVATIVE" | "BASE" | "AGGRESSIVE";
+
 type ProgramSelection = {
   scenarioCode: string;
   commercial: Partial<Record<CommercialCode, number>>;
   publicFacilities: PublicCode[];
   touched: CommercialCode[];
+  /** 2026-11-16: 임대주택(C04) 연면적을 정하는 주거 적정수요 시나리오. 없으면 중간(BASE). */
+  demandScenario?: DemandScenarioCode;
 };
+
+// 2026-11-16: 주거 적정수요(1인가구). /api/housing-demand → Supabase compute_housing_demand.
+type HousingDemand = {
+  basis: {
+    guName: string | null;
+    baseDate: string | null;
+    ownHouseholds: number | null;
+    adjacentHouseholds: number | null;
+    adjacentWeightPct: number | null;
+    daytimeNetInflow: number | null;
+    inflowConversionPct: number | null;
+    potentialDemandHouseholds: number | null;
+  };
+  scenarios: Array<{
+    code: DemandScenarioCode;
+    name: string;
+    capturePct: number | null;
+    plannedUnits: number | null;
+    demandSharePct: number | null;
+    demandCoverageMultiple: number | null;
+    appliedGfaSqm: number | null;
+  }>;
+};
+
+const STEP1_KEY = "inrealtylab.step1";
+const DEMAND_SOURCE_KEY = "inrealtylab.demand.source";
+const DEMAND_SOURCE = "HOUSING_DEMAND_V1";
+const HOUSING_CODE: CommercialCode = "C04_LIVING";
+const DEMAND_SCENARIO_LABEL: Record<DemandScenarioCode, string> = { CONSERVATIVE: "보수", BASE: "중간", AGGRESSIVE: "공격" };
+
+function readPrimaryPnu(): string | null {
+  try {
+    const raw = sessionStorage.getItem(STEP1_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { pnus?: string[] };
+    return Array.isArray(parsed.pnus) && parsed.pnus.length ? String(parsed.pnus[0]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatCount(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.round(value).toLocaleString("ko-KR") : "-";
+}
+
+/** 수요 시나리오 연면적을 수익시설 연면적 안으로 자르고, 잘린 만큼 계획 세대도 줄인다. */
+function housingPlan(row: HousingDemand["scenarios"][number] | undefined, commercialGfa: number, potential: number | null) {
+  if (!row || row.appliedGfaSqm === null || row.appliedGfaSqm <= 0) return null;
+  const gfa = commercialGfa > 0 ? Math.min(row.appliedGfaSqm, commercialGfa) : row.appliedGfaSqm;
+  const scale = gfa / row.appliedGfaSqm;
+  const units = row.plannedUnits === null ? null : Math.floor(row.plannedUnits * scale);
+  const share = potential && units ? (units / potential) * 100 : null;
+  const multiple = potential && units ? potential / units : null;
+  return { gfa, units, share, multiple, cappedByPool: scale < 1 };
+}
 
 function formatArea(value: number) {
   return `${Math.round(value).toLocaleString("ko-KR")}㎡`;
@@ -209,6 +268,8 @@ export default function ProgramChoice() {
   const [useLimits, setUseLimits] = useState<UseLimits>({});
   const [aboveGroundGfa, setAboveGroundGfa] = useState(0);
   const [selection, setSelection] = useState<ProgramSelection | null>(null);
+  const [housingDemand, setHousingDemand] = useState<HousingDemand | null>(null);
+  const [housingDemandNote, setHousingDemandNote] = useState("");
 
   useEffect(() => {
     setAllowedKeys(readAllowedKeys());
@@ -291,6 +352,41 @@ export default function ProgramChoice() {
     });
   }, [allowedKeys, available, maxPctOf, selection]);
 
+  // 2026-11-16: 임대주택을 고를 수 있는 필지면 주거 적정수요를 불러온다.
+  // 최대 연면적은 법정 지상 연면적을 넘기고, 수익시설 연면적 안으로 자르는 건 화면에서 한다.
+  const housingAvailable = available.some((facility) => facility.code === HOUSING_CODE);
+  useEffect(() => {
+    if (!housingAvailable || aboveGroundGfa <= 0) return;
+    const pnu = readPrimaryPnu();
+    if (!pnu) return;
+    let cancelled = false;
+    fetch(`/api/housing-demand?pnu=${encodeURIComponent(pnu)}&maxGfa=${Math.round(aboveGroundGfa)}`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.ok) {
+          setHousingDemand({ basis: data.basis, scenarios: data.scenarios });
+          setHousingDemandNote("");
+        } else {
+          setHousingDemand(null);
+          setHousingDemandNote(data?.message ?? "주거 적정수요를 불러오지 못했습니다.");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHousingDemandNote("주거 적정수요를 불러오지 못했습니다.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [housingAvailable, aboveGroundGfa]);
+
+  const demandScenario: DemandScenarioCode = selection?.demandScenario ?? "BASE";
+  const housingSelected = Boolean(selection && (selection.commercial[HOUSING_CODE] ?? 0) > 0);
+  const potentialDemand = housingDemand?.basis.potentialDemandHouseholds ?? null;
+  const activeHousingPlan = housingSelected
+    ? housingPlan(housingDemand?.scenarios.find((row) => row.code === demandScenario), commercialGfa, potentialDemand)
+    : null;
+
   useEffect(() => {
     if (!selection) return;
     try {
@@ -298,23 +394,79 @@ export default function ProgramChoice() {
 
       // STEP 3 엔진이 읽는 형태로도 같이 남긴다.
       // 이 다리가 없어서 지금까지 STEP 2 선택이 사업성 계산에 반영되지 않았다.
-      const facilities = Object.entries(selection.commercial)
-        .filter(([, pct]) => Number(pct) > 0)
-        .map(([facilityCode, ratioPct]) => ({ facilityCode, ratioPct: Number(ratioPct) }));
-      const total = facilities.reduce((sum, item) => sum + item.ratioPct, 0);
+      const picked = (Object.entries(selection.commercial) as Array<[CommercialCode, number]>)
+        .filter(([, pct]) => Number(pct) > 0);
+      const ratioTotal = picked.reduce((sum, [, pct]) => sum + Number(pct), 0);
+
+      if (activeHousingPlan) {
+        // 2026-11-16: 수요 연결. 임대주택 연면적은 슬라이더 비율이 아니라 주거 적정수요로 정하고,
+        // 나머지 수익시설은 고른 비율대로 수익시설 연면적을 나눠 갖는다.
+        // STEP 3(보고서)은 inrealtylab.demand.* 키가 채워져 있어야 수요 기준으로 계산한다.
+        // 이 키가 비어 있어서 지금까지 수익시설 연면적이 60% 고정 가정으로만 계산됐다.
+        const gfaByCode = new Map<CommercialCode, number>();
+        for (const [code, pct] of picked) {
+          gfaByCode.set(code, code === HOUSING_CODE ? activeHousingPlan.gfa : commercialGfa * (Number(pct) / 100));
+        }
+        const gfaTotal = Array.from(gfaByCode.values()).reduce((sum, value) => sum + value, 0);
+
+        for (const facility of COMMERCIAL) {
+          const key = `inrealtylab.demand.commercial.${facility.code}`;
+          const value = gfaByCode.get(facility.code);
+          if (value === undefined) sessionStorage.removeItem(key);
+          else sessionStorage.setItem(key, String(Math.round(value)));
+        }
+        sessionStorage.setItem("inrealtylab.demand.public", String(Math.round(publicGfa)));
+        sessionStorage.setItem(DEMAND_SOURCE_KEY, DEMAND_SOURCE);
+        sessionStorage.setItem(
+          "inrealtylab.housingDemand",
+          JSON.stringify({
+            segment: "SINGLE_1P",
+            scenario: demandScenario,
+            basis: housingDemand?.basis ?? null,
+            plannedUnits: activeHousingPlan.units,
+            gfaSqm: activeHousingPlan.gfa,
+            demandSharePct: activeHousingPlan.share,
+            demandCoverageMultiple: activeHousingPlan.multiple,
+          })
+        );
+
+        sessionStorage.setItem(
+          "inrealtylab.commercialAllocation",
+          JSON.stringify({
+            complete: gfaTotal > 0,
+            commercialPoolGfaSqm: gfaTotal,
+            facilities: Array.from(gfaByCode.entries()).map(([facilityCode, gfa]) => ({
+              facilityCode,
+              ratioPct: gfaTotal > 0 ? (gfa / gfaTotal) * 100 : 0,
+            })),
+          })
+        );
+        return;
+      }
+
+      // 임대주택이 빠졌으면, 이 화면이 써 넣었던 수요값만 지운다(관리자가 직접 넣은 값은 그대로 둔다).
+      if (sessionStorage.getItem(DEMAND_SOURCE_KEY) === DEMAND_SOURCE) {
+        for (const facility of COMMERCIAL) sessionStorage.removeItem(`inrealtylab.demand.commercial.${facility.code}`);
+        sessionStorage.removeItem("inrealtylab.demand.public");
+        sessionStorage.removeItem(DEMAND_SOURCE_KEY);
+        sessionStorage.removeItem("inrealtylab.housingDemand");
+      }
+
       sessionStorage.setItem(
         "inrealtylab.commercialAllocation",
         JSON.stringify({
           // 합계가 100%에 닿아야 배분이 확정된 것으로 본다(반올림 오차 0.5%p 허용).
-          complete: facilities.length > 0 && Math.abs(total - 100) <= 0.5,
+          complete: picked.length > 0 && Math.abs(ratioTotal - 100) <= 0.5,
           commercialPoolGfaSqm: commercialGfa,
-          facilities,
+          facilities: picked.map(([facilityCode, ratioPct]) => ({ facilityCode, ratioPct: Number(ratioPct) })),
         })
       );
     } catch {
       // 스토리지를 못 쓰면 STEP 3에서 기본 배분으로 계산한다.
     }
-  }, [selection, commercialGfa]);
+    // activeHousingPlan은 매 렌더 새 객체라 값(gfa)으로 의존한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, commercialGfa, publicGfa, housingDemand, demandScenario, activeHousingPlan?.gfa]);
 
 
 
@@ -531,6 +683,61 @@ export default function ProgramChoice() {
         <div className="regime-note">용적률 상한이 확인되면 연면적 배분을 계산합니다.</div>
       )}
 
+      {/* ── 주거 적정수요 (2026-11-16) ── */}
+      {housingAvailable && (
+        <div className="housing-demand">
+          <div className="program-head">
+            <div><strong>주거 적정수요</strong> <span>1인가구 기준</span></div>
+            {!housingSelected && <em className="program-note">임대주택을 넣으면 연면적에 반영됩니다</em>}
+          </div>
+          {housingDemand ? (
+            <>
+              <p className="choice-hint">
+                잠재 수요 <strong>{formatCount(potentialDemand)}가구</strong> = {housingDemand.basis.guName ?? "소재 자치구"} 1인가구{" "}
+                {formatCount(housingDemand.basis.ownHouseholds)} + 인접 자치구 1인가구 {formatCount(housingDemand.basis.adjacentHouseholds)} ×{" "}
+                {housingDemand.basis.adjacentWeightPct ?? "-"}% + 평일 주간 순유입인구 {formatCount(housingDemand.basis.daytimeNetInflow)} ×{" "}
+                {housingDemand.basis.inflowConversionPct ?? "-"}%
+              </p>
+              <div className="choice-grid three">
+                {housingDemand.scenarios.map((row) => {
+                  const plan = housingPlan(row, commercialGfa, potentialDemand);
+                  return (
+                    <button
+                      type="button"
+                      key={row.code}
+                      className={`choice-card${demandScenario === row.code ? " selected" : ""}`}
+                      onClick={() => setSelection((current) => (current ? { ...current, demandScenario: row.code } : current))}
+                    >
+                      <span className="choice-card-head">
+                        <i className="choice-radio" />
+                        <strong>{DEMAND_SCENARIO_LABEL[row.code] ?? row.name}</strong>
+                        <em className="choice-tag">포착률 {row.capturePct ?? "-"}%</em>
+                      </span>
+                      <span className="choice-desc">
+                        계획 {formatCount(plan?.units)}세대, {plan ? formatArea(plan.gfa) : "-"}
+                      </span>
+                      <span className="choice-desc">
+                        잠재 수요의 {plan?.share !== null && plan?.share !== undefined ? plan.share.toFixed(2) : "-"}%, 수요 여유{" "}
+                        {plan?.multiple ? plan.multiple.toFixed(0) : "-"}배
+                      </span>
+                      {plan?.cappedByPool && <span className="choice-desc">수익시설 연면적 상한 적용</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {activeHousingPlan && activeHousingPlan.multiple && (
+                <p className="choice-hint">
+                  {DEMAND_SCENARIO_LABEL[demandScenario]} 시나리오 계획 {formatCount(activeHousingPlan.units)}세대는 잠재 수요의{" "}
+                  {activeHousingPlan.share?.toFixed(2)}%로, 잠재 수요가 계획 세대의 약 {activeHousingPlan.multiple.toFixed(0)}배임.
+                </p>
+              )}
+            </>
+          ) : (
+            <div className="regime-note">{housingDemandNote || "주거 적정수요를 계산하고 있습니다."}</div>
+          )}
+        </div>
+      )}
+
       {/* ── 수익시설 ── */}
       <div className="program-head">
         <div><strong>수익시설</strong> <span>{aboveGroundGfa > 0 ? formatArea(commercialGfa) : "-"}</span></div>
@@ -568,8 +775,14 @@ export default function ProgramChoice() {
                   onChange={(event) => setCommercialPct(code, Number(event.target.value))}
                 />
                 <strong>{pct}%</strong>
-                <span>{aboveGroundGfa > 0 ? formatArea(assigned) : "-"}</span>
+                <span>{aboveGroundGfa > 0 ? formatArea(code === HOUSING_CODE && activeHousingPlan ? activeHousingPlan.gfa : assigned) : "-"}</span>
               </div>
+              {code === HOUSING_CODE && activeHousingPlan && (
+                <p className="program-row-note">
+                  임대주택 연면적은 비율이 아니라 주거 적정수요({DEMAND_SCENARIO_LABEL[demandScenario]}) 기준{" "}
+                  {formatArea(activeHousingPlan.gfa)}, 계획 {formatCount(activeHousingPlan.units)}세대로 사업성 계산에 반영됩니다.
+                </p>
+              )}
               {capSqm !== null && ceilingPct < 100 && (
                 <p className="program-row-note">
                   조례상 이 용도의 바닥면적 합계는 {formatArea(capSqm)} 미만입니다. 수익시설 {formatArea(commercialGfa)} 기준으로
