@@ -258,6 +258,20 @@ type HousingResolution = {
   notes: string[];
 };
 
+type NewBuildHousing = {
+  scope: "DONG" | "GU";
+  transactions: number | null;
+  complexes: number | null;
+  minBuildYear: number;
+  maxAreaSqm: number;
+  targetAreaSqm: number;
+  medianRentPerSqm: number | null;
+  appliedRentPerSqm: number | null;
+  excludedComplexes: Array<{ complex: string; dong: string; type: string; deals: number; rent_per_sqm: number }>;
+  byType: Record<string, { complexes: number; median: number }> | null;
+  basis: string;
+};
+
 type RentResolverResponse = {
   ok: boolean;
   submarket: string | null;
@@ -267,6 +281,7 @@ type RentResolverResponse = {
   facilities: RentFacility[];
   retail: RetailResolution | null;
   housing: HousingResolution | null;
+  housingNewBuild?: NewBuildHousing | null;
   missing: string[];
   note: string;
 };
@@ -716,6 +731,12 @@ export default function ReportPage() {
     };
   }, []);
 
+  // 법정동 이름(예: "서울특별시 성동구 행당동" → "행당동"). 신축 실거래 단가를 법정동 단위로 먼저 찾는 데 쓴다.
+  const legalDongName = useMemo(() => {
+    const raw = records[0]?.legalDong?.trim() ?? "";
+    return raw ? raw.split(/\s+/).pop() ?? "" : "";
+  }, [records]);
+
   // 시설별 적용 임대료를 DB에서 받아 sessionStorage에 넣는다.
   // integrated-report.ts의 readFacilityRent가 이 키를 읽는데, 지금까지 아무도 쓰지 않아
   // 모든 시설의 임대료가 0으로 계산됐다(= 매출 0 → DSCR·IRR 산출 불가).
@@ -730,6 +751,9 @@ export default function ReportPage() {
       if (tradeArea) query.set("tradeArea", tradeArea);
       query.set("housingType", housingType);
       query.set("housingStat", housingStat);
+      // 2026-11-17: 주거 임대료는 신축 실거래 단가를 1순위로 쓴다. 법정동 이름과 세대당 전용면적을 넘긴다.
+      if (legalDongName) query.set("dong", legalDongName);
+      query.set("housingUnitAreaSqm", "30");
 
       try {
         const response = await fetch(`/api/rent-resolver?${query.toString()}`, { cache: "no-store" });
@@ -757,7 +781,7 @@ export default function ReportPage() {
     return () => {
       cancelled = true;
     };
-  }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea, housingType, housingStat]);
+  }, [primaryPnu, retailSubtype, retailFloors, retailBasementFloors, tradeArea, housingType, housingStat, legalDongName]);
 
   // 새로고침·재방문해도 관리자가 입력한 수요면적이 남아있게 sessionStorage에서 복원한다.
   // 이게 없으면 관리자가 방금 입력한 값도 새로고침하는 순간 사라지고, 일반 모드의
@@ -1028,6 +1052,23 @@ export default function ReportPage() {
                   {[...rent.retail.notes, ...(rent.retail.floorRatio?.notes ?? [])].map((note) => (
                     <p key={note} style={{ margin: "6px 0 0" }}>{note}</p>
                   ))}
+                </div>
+              )}
+
+              {rent.housingNewBuild && rent.housingNewBuild.appliedRentPerSqm !== null && (
+                <div className="report-note no-print admin-only" style={{ marginTop: 10 }}>
+                  <strong>주거 적용 임대료(신축 실거래)</strong>: 전용 {rent.housingNewBuild.targetAreaSqm}㎡ 기준{" "}
+                  <strong>{rent.housingNewBuild.appliedRentPerSqm.toLocaleString()}원/㎡·월</strong>
+                  <div className="report-source" style={{ marginTop: 6 }}>{rent.housingNewBuild.basis}</div>
+                  {rent.housingNewBuild.excludedComplexes.length > 0 && (
+                    <p style={{ margin: "6px 0 0" }}>
+                      공공임대 추정 제외:{" "}
+                      {rent.housingNewBuild.excludedComplexes
+                        .map((item) => `${item.dong} ${item.complex}(${item.deals}건, ${Number(item.rent_per_sqm).toLocaleString()}원/㎡)`)
+                        .join(", ")}
+                    </p>
+                  )}
+                  <p style={{ margin: "6px 0 0" }}>아래 전세 환산값은 비교용 참고치이며 계산에는 신축 실거래 단가를 적용함.</p>
                 </div>
               )}
 

@@ -492,6 +492,63 @@ async function resolveHousing(
   };
 }
 
+type NewBuildHousing = {
+  scope: "DONG" | "GU";
+  transactions: number | null;
+  complexes: number | null;
+  minBuildYear: number;
+  maxAreaSqm: number;
+  targetAreaSqm: number;
+  medianRentPerSqm: number | null;
+  appliedRentPerSqm: number | null;
+  excludedComplexes: Array<{ complex: string; dong: string; type: string; deals: number; rent_per_sqm: number }>;
+  byType: Record<string, { complexes: number; median: number }> | null;
+  basis: string;
+};
+
+/**
+ * 2026-11-17 확정: 주거 임대료는 신축 단가를 쓴다.
+ * 국토부 전월세 실거래(아파트, 오피스텔, 연립다세대) 중 준공 5년 이내, 전용 59㎡ 이하, 최근 12개월 월세 거래를
+ * 단지별 중앙값으로 묶고, 공공임대 추정 단지(전체 중앙값의 50% 미만)를 뺀 뒤 목표 전용면적에서 직선 보간한다.
+ * 법정동 표본이 8개 단지 미만이면 시군구로 넓힌다. 적재된 실거래가 없는 지역은 null을 돌려주고 기존 전세 환산값을 쓴다.
+ */
+async function resolveHousingNewBuild(
+  url: string,
+  options: { pnu: string; dong: string | null; targetAreaSqm: number }
+): Promise<NewBuildHousing | null> {
+  const lawdCd = options.pnu.slice(0, 5);
+  if (!/^\d{5}$/.test(lawdCd)) return null;
+  try {
+    const response = await fetch(`${url}/rest/v1/rpc/housing_rent_new_build`, {
+      method: "POST",
+      cache: "no-store",
+      headers: supabasePublicHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+      body: JSON.stringify({ p_lawd_cd: lawdCd, p_umd_nm: options.dong, p_target_area_sqm: options.targetAreaSqm }),
+    });
+    if (!response.ok) return null;
+    const rows = (await response.json()) as Array<Record<string, unknown>>;
+    const row = rows?.[0];
+    const applied = row ? Number(row.applied_rent_per_sqm) : NaN;
+    if (!row || !Number.isFinite(applied) || applied <= 0) return null;
+    const num = (value: unknown) => (value === null || value === undefined ? null : Number(value));
+    return {
+      scope: row.scope === "DONG" ? "DONG" : "GU",
+      transactions: num(row.transactions),
+      complexes: num(row.complexes),
+      minBuildYear: Number(row.min_build_year),
+      maxAreaSqm: Number(row.max_area_sqm),
+      targetAreaSqm: options.targetAreaSqm,
+      medianRentPerSqm: num(row.median_rent_per_sqm),
+      appliedRentPerSqm: Math.round(applied),
+      excludedComplexes: (row.excluded_complexes as NewBuildHousing["excludedComplexes"]) ?? [],
+      byType: (row.by_type as NewBuildHousing["byType"]) ?? null,
+      basis: String(row.basis ?? ""),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const pnu = params.get("pnu")?.trim() ?? "";
@@ -507,6 +564,8 @@ export async function GET(request: NextRequest) {
   const requestedHousing = params.get("housingType")?.trim() || "";
   const housingType = HOUSING_TYPES.includes(requestedHousing) ? requestedHousing : "아파트";
   const housingStat = params.get("housingStat") === "MEDIAN" ? "MEDIAN" : "MEAN";
+  const dong = params.get("dong")?.trim() || null;
+  const housingUnitAreaSqm = Math.min(59, Math.max(10, Number(params.get("housingUnitAreaSqm")) || 30));
 
   try {
     const { url } = supabasePublicConfig();
@@ -611,6 +670,32 @@ export async function GET(request: NextRequest) {
       else facilities.push(entry);
     }
 
+    // 주거 1순위: 신축(준공 5년 이내, 전용 59㎡ 이하) 월세 실거래. 있으면 위의 전세 환산값을 대체하고,
+    // 전세 환산값은 비교용 대안으로 남긴다.
+    const housingNewBuild = pnu
+      ? await resolveHousingNewBuild(url, { pnu, dong, targetAreaSqm: housingUnitAreaSqm })
+      : null;
+    if (housingNewBuild && housingNewBuild.appliedRentPerSqm !== null) {
+      const existing = facilities.findIndex((item) => item.facilityCode === "C04_LIVING");
+      const previous = existing >= 0 ? facilities[existing] : null;
+      const entry = {
+        facilityCode: "C04_LIVING",
+        rentPerSqmMonth: housingNewBuild.appliedRentPerSqm,
+        rentKind: "CONTRACT",
+        geography: housingNewBuild.scope === "DONG" && dong ? dong : housing?.geographyName ?? pnu.slice(0, 5),
+        sampleCount: housingNewBuild.transactions ?? 0,
+        baseDate: new Date().toISOString().slice(0, 10),
+        source: `국토교통부 전월세 실거래가 (신축 ${housingNewBuild.minBuildYear}년 이후 준공, 전용 ${housingNewBuild.maxAreaSqm}㎡ 이하 월세)`,
+        originTable: "housing_rent_transaction",
+        matchedSubmarket: housingNewBuild.scope === "DONG",
+        alternatives: previous
+          ? [{ rentPerSqmMonth: previous.rentPerSqmMonth, rentKind: previous.rentKind, geography: previous.geography, baseDate: previous.baseDate, source: previous.source }, ...previous.alternatives].slice(0, 3)
+          : [],
+      };
+      if (existing >= 0) facilities[existing] = entry;
+      else facilities.push(entry);
+    }
+
     // 관측치가 없는 시설을 다른 시설에서 파생시킨다(part3_rent_derivation_rule).
     // 시장 자료가 아니라 내부 적용 기준이므로 rentKind를 DERIVED로 표시해 구분한다.
     const derivations: Array<{
@@ -689,6 +774,7 @@ export async function GET(request: NextRequest) {
       facilities,
       retail,
       housing,
+      housingNewBuild,
       derivations,
       missing,
       note:
