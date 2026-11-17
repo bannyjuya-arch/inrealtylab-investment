@@ -17,14 +17,15 @@ export const COMMERCIAL_CATEGORIES = [
   { key: "C01_OFFICE", label: "오피스" },
   { key: "C02_RETAIL", label: "리테일" },
   { key: "C03_HOSPITALITY", label: "호스피탈리티" },
-  { key: "C04_LIVING", label: "임대주택" },
+  { key: "C04_LIVING", label: "임대주택(1인가구)" },
+  // 2026-11-17: 대외 상품은 10개 유지. 실버는 임대주택(리빙) 계열의 하위 유형으로 표기한다.
+  { key: "C11_SILVER_STAY", label: "임대주택(실버)" },
   { key: "C05_HEALTHCARE", label: "헬스케어(병원)" },
   { key: "C06_EDUCATION", label: "교육" },
   { key: "C07_CULTURE_ENTERTAINMENT", label: "문화·엔터테인먼트" },
   { key: "C08_RND_LAB", label: "R&D·랩" },
   { key: "C09_LOGISTICS", label: "물류" },
   { key: "C10_DIGITAL_INFRA", label: "디지털 인프라" },
-  { key: "C11_SILVER_STAY", label: "실버스테이" },
 ] as const;
 
 /** 화면에는 시설 코드를 노출하지 않는다. 코드는 DB 조인용이고 사람이 읽는 건 이름이다. */

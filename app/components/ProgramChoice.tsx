@@ -39,9 +39,9 @@ const COMMERCIAL: CommercialFacility[] = [
   { code: "C01_OFFICE", label: "오피스", businessModel: "임대", allowedFrom: ["OFFICE_GENERAL"], priority: 10 },
   { code: "C02_RETAIL", label: "리테일", businessModel: "임대 · 분양", allowedFrom: ["RETAIL", "NEIGHBORHOOD_1", "NEIGHBORHOOD_2"], priority: 20 },
   { code: "C03_HOSPITALITY", label: "호스피탈리티", businessModel: "운영", allowedFrom: ["HOSPITALITY"], priority: 30 },
-  { code: "C04_LIVING", label: "임대주택", businessModel: "임대주택", allowedFrom: ["LIVING"], priority: 40 },
+  { code: "C04_LIVING", label: "임대주택(1인가구)", businessModel: "임대주택", allowedFrom: ["LIVING"], priority: 40 },
   // 2026-11-17: 실버스테이(C11, 주거형 임대)를 분리. C05는 병원(의료시설) 전용.
-  { code: "C11_SILVER_STAY", label: "실버스테이", businessModel: "임대주택", allowedFrom: ["LIVING", "WELFARE"], priority: 45 },
+  { code: "C11_SILVER_STAY", label: "임대주택(실버)", businessModel: "임대주택", allowedFrom: ["LIVING", "WELFARE"], priority: 45 },
   { code: "C05_HEALTHCARE", label: "헬스케어(병원)", businessModel: "운영", allowedFrom: ["MEDICAL"], priority: 50 },
   { code: "C06_EDUCATION", label: "교육", businessModel: "운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 60 },
   { code: "C07_CULTURE_ENTERTAINMENT", label: "문화 · 엔터테인먼트", businessModel: "운영", allowedFrom: ["CULTURE_ASSEMBLY", "SPORTS"], priority: 70 },
@@ -128,8 +128,8 @@ const SENIOR_CODE: CommercialCode = "C11_SILVER_STAY";
 
 // 수요로 연면적을 정하는 시설. 순서대로 수익시설 연면적을 나눠 갖는다(앞 시설이 먼저 채움).
 const DEMAND_FACILITIES: Array<{ code: CommercialCode; segment: "SINGLE_1P" | "SENIOR"; title: string; sub: string; noun: string }> = [
-  { code: HOUSING_CODE, segment: "SINGLE_1P", title: "주거 적정수요", sub: "1인가구 기준", noun: "임대주택" },
-  { code: SENIOR_CODE, segment: "SENIOR", title: "실버 적정수요", sub: "가구주 60세 이상 부부, 1인가구 기준", noun: "실버스테이" },
+  { code: HOUSING_CODE, segment: "SINGLE_1P", title: "임대주택(1인가구) 적정수요", sub: "1인가구 기준", noun: "임대주택(1인가구)" },
+  { code: SENIOR_CODE, segment: "SENIOR", title: "임대주택(실버) 적정수요", sub: "가구주 60세 이상 부부, 1인가구 기준", noun: "임대주택(실버)" },
 ];
 const DEMAND_SCENARIO_LABEL: Record<DemandScenarioCode, string> = { CONSERVATIVE: "보수", BASE: "중간", AGGRESSIVE: "공격" };
 
