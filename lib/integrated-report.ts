@@ -18,12 +18,13 @@ export const COMMERCIAL_CATEGORIES = [
   { key: "C02_RETAIL", label: "리테일" },
   { key: "C03_HOSPITALITY", label: "호스피탈리티" },
   { key: "C04_LIVING", label: "임대주택" },
-  { key: "C05_HEALTHCARE", label: "실버하우스·헬스케어" },
+  { key: "C05_HEALTHCARE", label: "헬스케어(병원)" },
   { key: "C06_EDUCATION", label: "교육" },
   { key: "C07_CULTURE_ENTERTAINMENT", label: "문화·엔터테인먼트" },
   { key: "C08_RND_LAB", label: "R&D·랩" },
   { key: "C09_LOGISTICS", label: "물류" },
   { key: "C10_DIGITAL_INFRA", label: "디지털 인프라" },
+  { key: "C11_SILVER_STAY", label: "실버스테이" },
 ] as const;
 
 /** 화면에는 시설 코드를 노출하지 않는다. 코드는 DB 조인용이고 사람이 읽는 건 이름이다. */
@@ -244,6 +245,8 @@ const FACILITY_REVENUE_POLICY: Record<string, { efficiency: number; opexPct: num
   C08_RND_LAB: { efficiency: 0.5714285714, opexPct: 30, leaseBased: false },
   C09_LOGISTICS: { efficiency: 1.0, opexPct: 30, leaseBased: false },
   C10_DIGITAL_INFRA: { efficiency: 0.1733333333, opexPct: 30, leaseBased: false },
+  // 2026-11-17: 실버스테이는 주거형 임대라 임대주택과 같은 전용률, 운영비, 임대 방식을 쓴다.
+  C11_SILVER_STAY: { efficiency: 0.70, opexPct: 30, leaseBased: true },
 };
 
 function nonNegative(value: number | null | undefined) {
@@ -268,7 +271,7 @@ function normalizeFacilityCode(code: string): string {
   const legacy: Record<string, string> = {
     C01: "C01_OFFICE", C02: "C02_RETAIL", C03: "C03_HOSPITALITY", C04: "C04_LIVING",
     C05: "C05_HEALTHCARE", C06: "C06_EDUCATION", C07: "C07_CULTURE_ENTERTAINMENT",
-    C08: "C08_RND_LAB", C09: "C09_LOGISTICS", C10: "C10_DIGITAL_INFRA",
+    C08: "C08_RND_LAB", C09: "C09_LOGISTICS", C10: "C10_DIGITAL_INFRA", C11: "C11_SILVER_STAY",
   };
   return legacy[code] ?? code;
 }

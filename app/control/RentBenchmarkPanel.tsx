@@ -12,7 +12,8 @@ type FacilityCode =
   | "C07_CULTURE_ENTERTAINMENT"
   | "C08_RND_LAB"
   | "C09_LOGISTICS"
-  | "C10_DIGITAL_INFRA";
+  | "C10_DIGITAL_INFRA"
+  | "C11_SILVER_STAY";
 
 type RentRow = {
   facility_code: DbFacilityCode;
@@ -58,12 +59,13 @@ const FACILITY_SOURCE: Record<string, { description: string; dbLinked: boolean }
   C02_RETAIL: { description: "한국부동산원 상권별 임대시세 · 층별효용비율 적용", dbLinked: true },
   C03_HOSPITALITY: { description: "임대료 자료 없음 — 가동률·객단가 모델 필요", dbLinked: false },
   C04_LIVING: { description: "국토부 전월세 실거래 · 전월세전환율 환산", dbLinked: true },
-  C05_HEALTHCARE: { description: "임대주택 임대료에서 파생 (인리얼티 내부 DB 분석 기준)", dbLinked: false },
+  C05_HEALTHCARE: { description: "임대료 자료 없음 (병원 운영 모델 필요)", dbLinked: false },
   C06_EDUCATION: { description: "임대료 자료 없음", dbLinked: false },
   C07_CULTURE_ENTERTAINMENT: { description: "임대료 자료 없음", dbLinked: false },
   C08_RND_LAB: { description: "오피스 임대료에서 파생 (인리얼티 내부 DB 분석 기준)", dbLinked: false },
   C09_LOGISTICS: { description: "임대료 자료 없음", dbLinked: false },
   C10_DIGITAL_INFRA: { description: "원/kW·월 단가라 ㎡ 환산 불가 — 별도 모델 필요", dbLinked: false },
+  C11_SILVER_STAY: { description: "임대주택 임대료의 120% (인리얼티 내부 DB 분석 기준)", dbLinked: false },
 };
 
 /** 서브마켓 코드는 리서치 용어라 화면에는 한글 권역명으로 바꿔 보여준다. */

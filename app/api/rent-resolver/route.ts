@@ -22,12 +22,13 @@ const FACILITY_LABEL: Record<string, string> = {
   C02_RETAIL: "리테일",
   C03_HOSPITALITY: "호스피탈리티",
   C04_LIVING: "임대주택",
-  C05_HEALTHCARE: "실버하우스·헬스케어",
+  C05_HEALTHCARE: "헬스케어(병원)",
   C06_EDUCATION: "교육",
   C07_CULTURE_ENTERTAINMENT: "문화·엔터테인먼트",
   C08_RND_LAB: "R&D·랩",
   C09_LOGISTICS: "물류",
   C10_DIGITAL_INFRA: "디지털 인프라",
+  C11_SILVER_STAY: "실버스테이",
 };
 const label = (code: string) => FACILITY_LABEL[code] ?? code;
 
@@ -763,6 +764,7 @@ export async function GET(request: NextRequest) {
       "C07_CULTURE_ENTERTAINMENT",
       "C08_RND_LAB",
       "C10_DIGITAL_INFRA",
+      "C11_SILVER_STAY",
     ].filter((code) => !covered.has(code));
 
     return NextResponse.json({

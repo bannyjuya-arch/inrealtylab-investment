@@ -21,7 +21,8 @@ const STORAGE_KEY = "inrealtylab.step2Program";
 // 써서, STEP 2에서 고른 구성이 STEP 3 계산에 연결되지 않았다.
 type CommercialCode =
   | "C01_OFFICE" | "C02_RETAIL" | "C03_HOSPITALITY" | "C04_LIVING" | "C05_HEALTHCARE"
-  | "C06_EDUCATION" | "C07_CULTURE_ENTERTAINMENT" | "C08_RND_LAB" | "C09_LOGISTICS" | "C10_DIGITAL_INFRA";
+  | "C06_EDUCATION" | "C07_CULTURE_ENTERTAINMENT" | "C08_RND_LAB" | "C09_LOGISTICS" | "C10_DIGITAL_INFRA"
+  | "C11_SILVER_STAY";
 
 type PublicCode = "P_R_PARKING" | "P_R_SENIOR_DAYCARE" | "P_R_PUBLIC_RENTAL_HOUSING" | "P_NR_GENERIC" | "P_NR_LIBRARY" | "P_NR_SENIOR_WELFARE_CENTER" | "P_NR_SOCIAL_WELFARE_CENTER" | "P_NR_PARK";
 
@@ -39,7 +40,9 @@ const COMMERCIAL: CommercialFacility[] = [
   { code: "C02_RETAIL", label: "리테일", businessModel: "임대 · 분양", allowedFrom: ["RETAIL", "NEIGHBORHOOD_1", "NEIGHBORHOOD_2"], priority: 20 },
   { code: "C03_HOSPITALITY", label: "호스피탈리티", businessModel: "운영", allowedFrom: ["HOSPITALITY"], priority: 30 },
   { code: "C04_LIVING", label: "임대주택", businessModel: "임대주택", allowedFrom: ["LIVING"], priority: 40 },
-  { code: "C05_HEALTHCARE", label: "실버하우스·헬스케어", businessModel: "운영", allowedFrom: ["MEDICAL"], priority: 50 },
+  // 2026-11-17: 실버스테이(C11, 주거형 임대)를 분리. C05는 병원(의료시설) 전용.
+  { code: "C11_SILVER_STAY", label: "실버스테이", businessModel: "임대주택", allowedFrom: ["LIVING", "WELFARE"], priority: 45 },
+  { code: "C05_HEALTHCARE", label: "헬스케어(병원)", businessModel: "운영", allowedFrom: ["MEDICAL"], priority: 50 },
   { code: "C06_EDUCATION", label: "교육", businessModel: "운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 60 },
   { code: "C07_CULTURE_ENTERTAINMENT", label: "문화 · 엔터테인먼트", businessModel: "운영", allowedFrom: ["CULTURE_ASSEMBLY", "SPORTS"], priority: 70 },
   { code: "C08_RND_LAB", label: "R&D · 랩", businessModel: "임대 · 운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 80 },
@@ -92,7 +95,7 @@ type ProgramSelection = {
   touched: CommercialCode[];
   /** 2026-11-16: 임대주택(C04) 연면적을 정하는 주거 적정수요 시나리오. 없으면 중간(BASE). */
   demandScenario?: DemandScenarioCode;
-  /** 2026-11-17: 수요 연결 시설별 시나리오(C04 임대주택, C05 실버하우스). C04는 demandScenario와 같은 값. */
+  /** 2026-11-17: 수요 연결 시설별 시나리오(C04 임대주택, C11 실버스테이). C04는 demandScenario와 같은 값. */
   demandScenarios?: Partial<Record<CommercialCode, DemandScenarioCode>>;
 };
 
@@ -121,12 +124,12 @@ const STEP1_KEY = "inrealtylab.step1";
 const DEMAND_SOURCE_KEY = "inrealtylab.demand.source";
 const DEMAND_SOURCE = "HOUSING_DEMAND_V1";
 const HOUSING_CODE: CommercialCode = "C04_LIVING";
-const SENIOR_CODE: CommercialCode = "C05_HEALTHCARE";
+const SENIOR_CODE: CommercialCode = "C11_SILVER_STAY";
 
 // 수요로 연면적을 정하는 시설. 순서대로 수익시설 연면적을 나눠 갖는다(앞 시설이 먼저 채움).
 const DEMAND_FACILITIES: Array<{ code: CommercialCode; segment: "SINGLE_1P" | "SENIOR"; title: string; sub: string; noun: string }> = [
   { code: HOUSING_CODE, segment: "SINGLE_1P", title: "주거 적정수요", sub: "1인가구 기준", noun: "임대주택" },
-  { code: SENIOR_CODE, segment: "SENIOR", title: "실버 적정수요", sub: "가구주 60세 이상 부부, 1인가구 기준", noun: "실버하우스" },
+  { code: SENIOR_CODE, segment: "SENIOR", title: "실버 적정수요", sub: "가구주 60세 이상 부부, 1인가구 기준", noun: "실버스테이" },
 ];
 const DEMAND_SCENARIO_LABEL: Record<DemandScenarioCode, string> = { CONSERVATIVE: "보수", BASE: "중간", AGGRESSIVE: "공격" };
 
@@ -214,6 +217,7 @@ const USE_LABEL: Record<string, string> = {
   HOSPITALITY: "숙박시설",
   LIVING: "공동주택",
   MEDICAL: "의료시설",
+  WELFARE: "노유자시설",
   EDUCATION_RESEARCH: "교육연구시설",
   CULTURE_ASSEMBLY: "문화 및 집회시설",
   SPORTS: "운동시설",
