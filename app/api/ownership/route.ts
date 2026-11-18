@@ -1,9 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
+import { supabasePublicConfig, supabasePublicHeaders } from "../lib/supabase-public";
 
 const LAND_OWNERSHIP_URL = "https://api.vworld.kr/ned/data/getPossessionAttr";
 
 type RawOwnership = Record<string, unknown>;
 type AssetClassStatus = "ADMINISTRATIVE" | "GENERAL" | "UNKNOWN";
+
+// DB(parcel_asset_class 뷰)의 재산구분 1차 분류 결과.
+// K-GeoP 토지소유정보 + 지목 규칙: ADMINISTRATIVE_LIKELY(행정재산 추정) / REVIEW(대장 대조 필요)
+type AssetClassLookup = {
+  status: "ADMINISTRATIVE_LIKELY" | "GENERAL_CONFIRMED" | "REVIEW";
+  basis: string;
+  landCategory: string | null;
+  ownerGroup: string | null;
+  referenceMonth: string | null;
+};
+
+async function lookupAssetClass(pnu: string): Promise<AssetClassLookup | null> {
+  try {
+    const { url } = supabasePublicConfig();
+    const select = "pnu,asset_class_status,asset_class_basis,land_category_name,owner_group";
+    const res = await fetch(`${url}/rest/v1/parcel_asset_class?pnu=eq.${pnu}&select=${select}`, {
+      headers: supabasePublicHeaders({ Accept: "application/json" }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as Array<Record<string, unknown>>;
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      status: String(row.asset_class_status) as AssetClassLookup["status"],
+      basis: asText(row.asset_class_basis),
+      landCategory: asText(row.land_category_name) || null,
+      ownerGroup: asText(row.owner_group) || null,
+      referenceMonth: "2026-09",
+    };
+  } catch {
+    return null;
+  }
+}
 
 function asText(value: unknown) {
   return value === undefined || value === null ? "" : String(value).trim();
@@ -122,7 +157,7 @@ function buildCandidateRoutes(ownerTypes: string[], assetClass: AssetClassStatus
   return [];
 }
 
-function assess(records: ReturnType<typeof normalizeRecord>[]) {
+function assess(records: ReturnType<typeof normalizeRecord>[], lookup: AssetClassLookup | null = null) {
   const ownerSectors = unique(records.map((record) => record.ownerSector));
   const ownerTypes = unique(records.map((record) => record.ownerType));
   const ownerClasses = unique(records.map((record) => record.ownerClass));
@@ -167,11 +202,23 @@ function assess(records: ReturnType<typeof normalizeRecord>[]) {
     };
   }
 
-  // VWorld 토지소유정보만으로는 행정재산/일반재산을 확정할 수 없다.
-  // 향후 공유재산대장·국유재산대장 등 공식 재산구분 데이터가 연결되면
-  // 이 값을 ADMINISTRATIVE 또는 GENERAL로 치환하고 buildCandidateRoutes에서 자동 분기한다.
-  const assetClass: AssetClassStatus = "UNKNOWN";
-  const assetClassBasis = "공식 재산구분 데이터 미연결 — 현재 사용용도만으로 법적 재산구분을 확정하지 않음";
+  // VWorld 토지소유정보만으로는 행정재산/일반재산을 확정할 수 없어
+  // DB의 1차 분류(parcel_asset_class)를 읽는다. 지목이 도로, 하천, 공원 등 공공용이면 행정재산 추정,
+  // 그 밖은 캠코 국유일반재산, 시유재산, 구유재산 대장 대조 전까지 미확정으로 둔다.
+  let assetClass: AssetClassStatus = "UNKNOWN";
+  let assetClassBasis = "재산구분 DB에 이 필지가 없음 — 법적 재산구분 확인 필요";
+  let assetClassConfidence: "CONFIRMED" | "ESTIMATED" | "NONE" = "NONE";
+  if (lookup?.status === "GENERAL_CONFIRMED") {
+    assetClass = "GENERAL";
+    assetClassConfidence = "CONFIRMED";
+    assetClassBasis = lookup.basis;
+  } else if (lookup?.status === "ADMINISTRATIVE_LIKELY") {
+    assetClass = "ADMINISTRATIVE";
+    assetClassConfidence = "ESTIMATED";
+    assetClassBasis = `행정재산 추정: ${lookup.basis}`;
+  } else if (lookup?.status === "REVIEW") {
+    assetClassBasis = `일반재산 후보: ${lookup.basis}`;
+  }
 
   let governingRegime = "공공자산 관련 법령·기관 규정 확인";
   if (ownerTypes.includes("STATE")) governingRegime = "국유재산법 체계 검토";
@@ -180,10 +227,19 @@ function assess(records: ReturnType<typeof normalizeRecord>[]) {
 
   const candidateRoutes = buildCandidateRoutes(ownerTypes, assetClass);
 
+  const assetHeadline =
+    assetClass === "GENERAL"
+      ? "공공소유 확인 — 일반재산 확인, 대부와 위탁개발 검토 가능"
+      : assetClass === "ADMINISTRATIVE"
+        ? "공공소유 확인 — 행정재산 추정, 사용허가와 복합화 중심 검토"
+        : lookup?.status === "REVIEW"
+          ? "공공소유 확인 — 일반재산 후보, 재산대장 대조 필요"
+          : "공공소유 확인 — 재산구분 확인 후 사업구조 판정";
+
   return {
     inScope: true,
     readiness: "CONDITIONAL_REVIEW",
-    headline: "공공소유 확인 — 재산구분 확인 후 사업구조 판정",
+    headline: assetHeadline,
     summary:
       "공공소유는 확인되었습니다. 행정재산/일반재산 구분을 먼저 확인하고, 관리주체·현재 사용상태·의사결정권자를 반영해 가능한 사업추진 방식과 PPP 적합성을 판정합니다.",
     governingRegime,
@@ -191,14 +247,22 @@ function assess(records: ReturnType<typeof normalizeRecord>[]) {
     ownerTypes,
     assetClass,
     assetClassBasis,
+    assetClassConfidence,
+    assetClassCandidate: lookup?.status === "REVIEW",
+    assetClassSource: lookup
+      ? { name: "INRealtyLab 재산구분 1차 분류 (K-GeoP 토지소유정보 + 지목 규칙)", referenceMonth: lookup.referenceMonth, landCategory: lookup.landCategory }
+      : null,
     gates: [
       { key: "OWNERSHIP", label: "공공소유 여부", status: "PASS", detail: ownerClasses.join(", ") },
       { key: "MANAGER", label: "관리주체", status: "REVIEW", detail: "소유권자와 별도로 재산관리관·관리권자·운영주체 확인 필요" },
       {
         key: "ASSET_CLASS",
         label: "재산구분 GATE",
-        status: "REVIEW",
-        detail: "행정재산 / 일반재산 공식 구분 확인 필요 — 확인 전 일반재산 위탁개발 등 상호 배타적 사업방식은 후보에서 제외",
+        status: assetClassConfidence === "CONFIRMED" ? "PASS" : "REVIEW",
+        detail:
+          assetClassConfidence === "NONE" && !lookup
+            ? "행정재산 / 일반재산 공식 구분 확인 필요 — 확인 전 일반재산 위탁개발 등 상호 배타적 사업방식은 후보에서 제외"
+            : assetClassBasis,
       },
       { key: "CURRENT_USE", label: "현재 사용상태", status: "REVIEW", detail: "공원·주차장·청사 등 공공기능 및 직접사용·유휴·임대·사용허가·점유 여부 확인 필요" },
       { key: "DECISION_AUTHORITY", label: "사업 의사결정권자", status: "REVIEW", detail: "관리권자와 별도로 관리·처분·개발 의사결정 권한자 확인 필요" },
@@ -335,12 +399,13 @@ export async function GET(request: NextRequest) {
     }
 
     const records = deduped.map(normalizeRecord);
+    const assetLookup = await lookupAssetClass(pnu);
 
     return NextResponse.json({
       ok: true,
       pnu,
       records,
-      assessment: assess(records),
+      assessment: assess(records, assetLookup),
       source: {
         name: "VWorld 국토정보 토지소유정보",
         endpoint: "NED getPossessionAttr",
