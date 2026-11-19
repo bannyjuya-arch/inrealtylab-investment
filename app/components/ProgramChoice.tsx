@@ -10,6 +10,7 @@
 // 허용 facility_key 목록으로 고를 수 있는 시설을 걸러낸다.
 
 import { useEffect, useMemo, useState } from "react";
+import { FACILITY_PROGRAM_EVENT, FACILITY_PROGRAM_KEY, type FacilityProgramResult } from "./FacilityProgramPanel";
 
 const ALLOWED_KEY = "inrealtylab.step2AllowedUse";
 const LIMITS_KEY = "inrealtylab.step2UseLimits";
@@ -97,7 +98,24 @@ type ProgramSelection = {
   demandScenario?: DemandScenarioCode;
   /** 2026-11-17: 수요 연결 시설별 시나리오(C04 임대주택, C11 실버스테이). C04는 demandScenario와 같은 값. */
   demandScenarios?: Partial<Record<CommercialCode, DemandScenarioCode>>;
+  /** 2026-11-19: 1차 제안 근거. DEMAND_THEME = 수요 기반 프로그램 도출(청구항 7, 8), PRIORITY = 기존 우선순위 70:30. */
+  basis?: "DEMAND_THEME" | "PRIORITY";
+  /** 수요 계산 입력 키(pnu|용도지역|연면적). 바뀌면 손대지 않은 제안을 다시 만든다. */
+  demandKey?: string;
+  /** 수익시설 연면적 중 시설별 수요(중간)로 뒷받침되는 비율(%). */
+  demandCoveredPct?: number;
 };
+
+type StoredFacilityProgram = FacilityProgramResult & { key?: string };
+
+function readFacilityProgram(): StoredFacilityProgram | null {
+  try {
+    const raw = sessionStorage.getItem(FACILITY_PROGRAM_KEY);
+    return raw ? (JSON.parse(raw) as StoredFacilityProgram) : null;
+  } catch {
+    return null;
+  }
+}
 
 // 2026-11-16: 주거 적정수요(1인가구), 2026-11-17: 실버 적정수요(가구주 60세 이상 부부, 1인가구).
 // /api/housing-demand?segment=SINGLE_1P|SENIOR → Supabase compute_housing_demand / compute_senior_demand.
@@ -274,6 +292,67 @@ function recommend(
   return plan;
 }
 
+// 2026-11-19: 수요 기반 1차 제안.
+// 허용 시설 중 수요(중간 시나리오 연면적)가 있는 시설에 수요 비례로 배분한다. 1순위 테마의 시설을 먼저 채운다.
+// 수요 합계가 수익시설 연면적보다 크면 비례 축소, 작으면 남는 몫은 테마 시설, 그 밖의 허용 시설 순으로 넘긴다.
+// 남는 몫은 수요로 확인되지 않은 면적이라 demandCoveredPct로 따로 보여준다.
+function recommendFromDemand(
+  available: CommercialFacility[],
+  maxPctOf: (facility: CommercialFacility) => number,
+  commercialGfa: number,
+  program: StoredFacilityProgram | null
+): { commercial: Partial<Record<CommercialCode, number>>; publicFacilities: PublicCode[]; coveredPct: number } | null {
+  if (!program || commercialGfa <= 0 || !available.length) return null;
+  const themeOrder = program.theme_scores?.[0]?.commercial_facilities ?? [];
+  const rank = (code: string) => {
+    const index = themeOrder.indexOf(code);
+    return index < 0 ? 99 : index;
+  };
+  const candidates = available
+    .map((facility) => ({ facility, gfa: Number(program.demand_gfa?.[facility.code]?.base ?? 0) }))
+    .filter((item) => item.gfa > 0)
+    .sort((a, b) => rank(a.facility.code) - rank(b.facility.code) || b.gfa - a.gfa);
+  if (!candidates.length) return null;
+
+  const demandPct = (candidates.reduce((sum, item) => sum + item.gfa, 0) / commercialGfa) * 100;
+  const scale = demandPct > 100 ? 100 / demandPct : 1;
+  const plan: Partial<Record<CommercialCode, number>> = {};
+  let remaining = 100;
+  let covered = 0;
+  for (const item of candidates) {
+    const pct = Math.floor(Math.min((item.gfa / commercialGfa) * 100 * scale, maxPctOf(item.facility), remaining));
+    if (pct <= 0) continue;
+    plan[item.facility.code] = pct;
+    remaining -= pct;
+    covered += pct;
+  }
+  // 반올림, 상한으로 남은 몫: 수요가 있는 시설 → 테마 시설 → 그 밖의 허용 시설 순.
+  const fallback = [
+    ...candidates.map((item) => item.facility),
+    ...[...available].sort((a, b) => rank(a.code) - rank(b.code) || a.priority - b.priority),
+  ];
+  for (const facility of fallback) {
+    if (remaining <= 0) break;
+    const current = plan[facility.code] ?? 0;
+    const room = Math.max(0, maxPctOf(facility) - current);
+    if (room <= 0) continue;
+    const add = Math.min(room, remaining);
+    plan[facility.code] = current + add;
+    remaining -= add;
+  }
+
+  const allowedPublic = new Set(PUBLIC_FACILITIES.map((item) => item.code as string));
+  const publicFacilities = (program.program?.public ?? [])
+    .map((item) => item.facility_code)
+    .filter((code): code is PublicCode => allowedPublic.has(code));
+
+  return {
+    commercial: plan,
+    publicFacilities: publicFacilities.length ? publicFacilities : ["P_R_PARKING", "P_NR_SOCIAL_WELFARE_CENTER"],
+    coveredPct: Math.min(100, Math.round(scale < 1 ? 100 : demandPct)),
+  };
+}
+
 export default function ProgramChoice() {
   const [allowedKeys, setAllowedKeys] = useState<string[] | null>(null);
   const [useLimits, setUseLimits] = useState<UseLimits>({});
@@ -281,6 +360,15 @@ export default function ProgramChoice() {
   const [selection, setSelection] = useState<ProgramSelection | null>(null);
   const [demands, setDemands] = useState<Partial<Record<CommercialCode, HousingDemand | null>>>({});
   const [demandNotes, setDemandNotes] = useState<Partial<Record<CommercialCode, string>>>({});
+  const [facilityProgram, setFacilityProgram] = useState<StoredFacilityProgram | null>(null);
+
+  // 2026-11-19: 수요 기반 프로그램 도출 결과(FacilityProgramPanel)를 받는다.
+  useEffect(() => {
+    setFacilityProgram(readFacilityProgram());
+    const onProgram = () => setFacilityProgram(readFacilityProgram());
+    window.addEventListener(FACILITY_PROGRAM_EVENT, onProgram);
+    return () => window.removeEventListener(FACILITY_PROGRAM_EVENT, onProgram);
+  }, []);
 
   useEffect(() => {
     setAllowedKeys(readAllowedKeys());
@@ -337,6 +425,32 @@ export default function ProgramChoice() {
     };
   }, [capsSqm, commercialGfa]);
 
+  // 1차 제안: 수요 기반 결과가 있으면 그것으로, 없으면 기존 우선순위 70:30.
+  // 시나리오(공공:수익)에 따라 수익시설 연면적이 달라지므로 그 시나리오의 연면적으로 비율을 낸다.
+  function buildRecommended(scenarioCode: string): ProgramSelection {
+    const target = SCENARIOS.find((item) => item.code === scenarioCode) ?? SCENARIOS[1];
+    const pool = aboveGroundGfa * (target.commercialPct / 100);
+    const byDemand = recommendFromDemand(available, maxPctOf, pool, facilityProgram);
+    if (byDemand) {
+      return {
+        scenarioCode,
+        commercial: byDemand.commercial,
+        publicFacilities: byDemand.publicFacilities,
+        touched: [],
+        basis: "DEMAND_THEME",
+        demandKey: facilityProgram?.key,
+        demandCoveredPct: byDemand.coveredPct,
+      };
+    }
+    return {
+      scenarioCode,
+      commercial: recommend(available, maxPctOf),
+      publicFacilities: ["P_R_PARKING", "P_NR_SOCIAL_WELFARE_CENTER"],
+      touched: [],
+      basis: "PRIORITY",
+    };
+  }
+
   // 1차 제안을 만들거나, 저장해둔 사용자 수정본을 되살린다 — 이건 최초 1회만 해야 하는 일이다.
   // 버그였던 부분: 의존성 배열에 maxPctOf가 들어있었는데, maxPctOf는 commercialGfa가 바뀔 때마다
   // (= 시나리오 카드를 "공공성 중심"/"수익성 중심"으로 바꿀 때마다) 새 함수 참조로 다시 만들어진다.
@@ -355,13 +469,19 @@ export default function ProgramChoice() {
     } catch {
       // 저장본을 못 읽으면 새로 제안한다.
     }
-    setSelection({
-      scenarioCode: RECOMMENDED_SCENARIO,
-      commercial: recommend(available, maxPctOf),
-      publicFacilities: ["P_R_PARKING", "P_NR_SOCIAL_WELFARE_CENTER"],
-      touched: [],
-    });
+    setSelection(buildRecommended(RECOMMENDED_SCENARIO));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowedKeys, available, maxPctOf, selection]);
+
+  // 수요 결과가 나중에 도착하거나 입력(용도지역, 연면적)이 바뀌면, 사용자가 아직 손대지 않은 제안만 수요 기반으로 다시 만든다.
+  useEffect(() => {
+    if (!selection || !facilityProgram || !allowedKeys) return;
+    if (selection.touched.length > 0) return;
+    if (selection.basis === "DEMAND_THEME" && selection.demandKey === facilityProgram.key) return;
+    const next = buildRecommended(selection.scenarioCode);
+    if (next.basis === "DEMAND_THEME") setSelection({ ...selection, ...next, demandScenario: selection.demandScenario, demandScenarios: selection.demandScenarios });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [facilityProgram, allowedKeys, selection?.touched.length]);
 
   // 2026-11-16: 임대주택, 2026-11-17: 실버하우스. 고를 수 있는 필지면 시설별 적정수요를 불러온다.
   // 최대 연면적은 법정 지상 연면적을 넘기고, 수익시설 연면적 안으로 자르는 건 화면에서 한다.
@@ -645,12 +765,7 @@ export default function ProgramChoice() {
   }
 
   function resetToRecommended() {
-    setSelection({
-      scenarioCode: RECOMMENDED_SCENARIO,
-      commercial: recommend(available, maxPctOf),
-      publicFacilities: ["P_R_PARKING", "P_NR_SOCIAL_WELFARE_CENTER"],
-      touched: [],
-    });
+    setSelection(buildRecommended(RECOMMENDED_SCENARIO));
   }
 
   if (!allowedKeys) {
@@ -686,7 +801,10 @@ export default function ProgramChoice() {
         <button type="button" className="choice-reset" onClick={resetToRecommended}>추천 구성으로 되돌리기</button>
       </div>
       <p className="choice-hint">
-        수요를 기준으로 구성을 먼저 제안했습니다. 각 줄을 바꾸면 손대지 않은 줄이 자동으로 조정돼 합계 100%가 유지됩니다.
+        {selection.basis === "DEMAND_THEME"
+          ? `수요 기반 프로그램 도출 결과(추천 테마 ${facilityProgram?.selected_theme?.name ?? "-"})로 구성을 먼저 제안했습니다. 수익시설 연면적 중 시설별 수요(중간)로 뒷받침되는 면적은 ${selection.demandCoveredPct ?? "-"}%입니다.`
+          : "허용 시설 우선순위로 구성을 먼저 제안했습니다."}{" "}
+        각 줄을 바꾸면 손대지 않은 줄이 자동으로 조정돼 합계 100%가 유지됩니다.
       </p>
 
       {/* ── 시나리오 ── */}

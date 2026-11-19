@@ -5,6 +5,7 @@ import PublicAssetDetails from "./PublicAssetDetails";
 import SiteProgram from "../components/SiteProgram";
 import StructureChoice from "../components/StructureChoice";
 import ProgramChoice from "../components/ProgramChoice";
+import FacilityProgramPanel from "../components/FacilityProgramPanel";
 import "./control.css";
 
 type Gate = {
@@ -263,6 +264,9 @@ export default function ControlPage() {
 
           {/* 2026-09-03: 사업방식·사업주체 두 축 선택 */}
           <StructureChoice />
+
+          {/* 2026-11-19: 수요 기반 프로그램 도출(특허 청구항 3, 7, 8) — 아래 시설 구성의 1차 제안 근거 */}
+          <FacilityProgramPanel />
 
           {/* 2026-09-03: 시설 구성 — 1차 제안 후 사용자 수정 */}
           <ProgramChoice />
