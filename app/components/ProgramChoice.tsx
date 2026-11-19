@@ -42,7 +42,8 @@ const COMMERCIAL: CommercialFacility[] = [
   { code: "C03_HOSPITALITY", label: "호스피탈리티", businessModel: "운영", allowedFrom: ["HOSPITALITY"], priority: 30 },
   { code: "C04_LIVING", label: "임대주택(1인가구)", businessModel: "임대주택", allowedFrom: ["LIVING"], priority: 40 },
   // 2026-11-17: 실버스테이(C11, 주거형 임대)를 분리. C05는 병원(의료시설) 전용.
-  { code: "C11_SILVER_STAY", label: "임대주택(실버)", businessModel: "임대주택", allowedFrom: ["LIVING", "WELFARE"], priority: 45 },
+  // 2026-11-19: 실버스테이는 주거(LIVING) 허용일 때만 선택. 노인복지시설(WELFARE)은 공공시설 쪽에서 별도로 다룬다.
+  { code: "C11_SILVER_STAY", label: "임대주택(실버)", businessModel: "임대주택", allowedFrom: ["LIVING"], priority: 45 },
   { code: "C05_HEALTHCARE", label: "헬스케어(병원)", businessModel: "운영", allowedFrom: ["MEDICAL"], priority: 50 },
   { code: "C06_EDUCATION", label: "교육", businessModel: "운영", allowedFrom: ["EDUCATION_RESEARCH"], priority: 60 },
   { code: "C07_CULTURE_ENTERTAINMENT", label: "문화 · 엔터테인먼트", businessModel: "운영", allowedFrom: ["CULTURE_ASSEMBLY", "SPORTS"], priority: 70 },
@@ -846,11 +847,10 @@ export default function ProgramChoice() {
       )}
 
       {/* ── 적정수요: 주거(2026-11-16), 실버(2026-11-17) ── */}
-      {demandAvailable.map((item) => {
+      {/* 2026-11-19: 수익시설에서 해당 임대주택을 고른 경우에만 그 시설의 수요 시나리오 3개를 보여준다. 산식 설명은 툴팁으로. */}
+      {demandAvailable.filter((item) => (selection.commercial[item.code] ?? 0) > 0).map((item) => {
         const demand = demands[item.code];
-        const selected = (selection.commercial[item.code] ?? 0) > 0;
         const current = scenarioOf(item.code);
-        const activePlan = activePlans[item.code];
         // 앞 시설이 이미 쓴 면적을 빼고 남은 수익시설 연면적.
         const before = DEMAND_FACILITIES.slice(0, DEMAND_FACILITIES.findIndex((d) => d.code === item.code))
           .reduce((sum, d) => sum + (activePlans[d.code]?.gfa ?? 0), 0);
@@ -860,13 +860,14 @@ export default function ProgramChoice() {
           <div className="housing-demand" key={item.code}>
             <div className="program-head">
               <div><strong>{item.title}</strong> <span>{item.sub}</span></div>
-              {!selected && <em className="program-note">{item.noun}을 넣으면 연면적에 반영됩니다</em>}
+              {demand && (
+                <em className="program-note" title={`잠재 수요 = ${demand.basis.text}`}>
+                  잠재 수요 {formatCount(potential)}가구
+                </em>
+              )}
             </div>
             {demand ? (
               <>
-                <p className="choice-hint">
-                  잠재 수요 <strong>{formatCount(potential)}가구</strong> = {demand.basis.text}
-                </p>
                 <div className="choice-grid three">
                   {demand.scenarios.map((row) => {
                     const plan = housingPlan(row, pool, potential);
@@ -893,23 +894,13 @@ export default function ProgramChoice() {
                           <em className="choice-tag">포착률 {row.capturePct ?? "-"}%</em>
                         </span>
                         <span className="choice-desc">
-                          계획 {formatCount(plan?.units)}세대, {plan ? formatArea(plan.gfa) : "-"}
+                          {formatCount(plan?.units)}세대, {plan ? formatArea(plan.gfa) : "-"}
+                          {plan?.cappedByPool ? " (상한)" : ""}
                         </span>
-                        <span className="choice-desc">
-                          잠재 수요의 {plan?.share !== null && plan?.share !== undefined ? plan.share.toFixed(2) : "-"}%, 수요 여유{" "}
-                          {plan?.multiple ? plan.multiple.toFixed(0) : "-"}배
-                        </span>
-                        {plan?.cappedByPool && <span className="choice-desc">수익시설 연면적 상한 적용</span>}
                       </button>
                     );
                   })}
                 </div>
-                {activePlan && activePlan.multiple && (
-                  <p className="choice-hint">
-                    {DEMAND_SCENARIO_LABEL[current]} 시나리오 계획 {formatCount(activePlan.units)}세대는 잠재 수요의{" "}
-                    {activePlan.share?.toFixed(2)}%로, 잠재 수요가 계획 세대의 약 {activePlan.multiple.toFixed(0)}배임.
-                  </p>
-                )}
               </>
             ) : (
               <div className="regime-note">{demandNotes[item.code] || `${item.title}를 계산하고 있습니다.`}</div>
