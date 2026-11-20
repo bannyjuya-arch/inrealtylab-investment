@@ -14,12 +14,15 @@ type AssetClassLookup = {
   landCategory: string | null;
   ownerGroup: string | null;
   referenceMonth: string | null;
+  kamcoStatus?: string | null;
+  soldDate?: string | null;
+  soldAfterReference?: boolean;
 };
 
 async function lookupAssetClass(pnu: string): Promise<AssetClassLookup | null> {
   try {
     const { url } = supabasePublicConfig();
-    const select = "pnu,asset_class_status,asset_class_basis,land_category_name,owner_group";
+    const select = "pnu,asset_class_status,asset_class_basis,land_category_name,owner_group,kamco_mng_stat,kamco_sold_date,sold_after_reference";
     const res = await fetch(`${url}/rest/v1/parcel_asset_class?pnu=eq.${pnu}&select=${select}`, {
       headers: supabasePublicHeaders({ Accept: "application/json" }),
       cache: "no-store",
@@ -34,6 +37,10 @@ async function lookupAssetClass(pnu: string): Promise<AssetClassLookup | null> {
       landCategory: asText(row.land_category_name) || null,
       ownerGroup: asText(row.owner_group) || null,
       referenceMonth: "2026-09",
+      // 2026-11-19: 캠코 온비드 국유일반재산 목록, 국유부동산 매각현황과 대조한 결과
+      kamcoStatus: asText(row.kamco_mng_stat) || null,
+      soldDate: asText(row.kamco_sold_date) || null,
+      soldAfterReference: row.sold_after_reference === true,
     };
   } catch {
     return null;
@@ -227,8 +234,9 @@ function assess(records: ReturnType<typeof normalizeRecord>[], lookup: AssetClas
 
   const candidateRoutes = buildCandidateRoutes(ownerTypes, assetClass);
 
-  const assetHeadline =
-    assetClass === "GENERAL"
+  const assetHeadline = lookup?.soldAfterReference
+    ? `공공소유 자료 기준월 이후 매각 계약(${lookup.soldDate ?? "-"}) 확인 — 현재 소유 재확인 필요`
+    : assetClass === "GENERAL"
       ? "공공소유 확인 — 일반재산 확인, 대부와 위탁개발 검토 가능"
       : assetClass === "ADMINISTRATIVE"
         ? "공공소유 확인 — 행정재산 추정, 사용허가와 복합화 중심 검토"
@@ -250,7 +258,16 @@ function assess(records: ReturnType<typeof normalizeRecord>[], lookup: AssetClas
     assetClassConfidence,
     assetClassCandidate: lookup?.status === "REVIEW",
     assetClassSource: lookup
-      ? { name: "INRealtyLab 재산구분 1차 분류 (K-GeoP 토지소유정보 + 지목 규칙)", referenceMonth: lookup.referenceMonth, landCategory: lookup.landCategory }
+      ? {
+          name:
+            lookup.status === "GENERAL_CONFIRMED"
+              ? "캠코 온비드 정부재산목록 국유일반재산 대조"
+              : "INRealtyLab 재산구분 1차 분류 (K-GeoP 토지소유정보 + 지목 규칙)",
+          referenceMonth: lookup.referenceMonth,
+          landCategory: lookup.landCategory,
+          kamcoStatus: lookup.kamcoStatus ?? null,
+          soldDate: lookup.soldDate ?? null,
+        }
       : null,
     gates: [
       { key: "OWNERSHIP", label: "공공소유 여부", status: "PASS", detail: ownerClasses.join(", ") },
