@@ -115,6 +115,26 @@ function citation(row: PermissionRow) {
   return `${ref} ${row.clause}${row.item_no ? ` ${row.item_no}목` : ""}`;
 }
 
+/** 화면 표의 근거 열용 짧은 조문 표기. 예: "영 별표5 제1항 다목", "조례 별표5 제1항 3아목" */
+function shortCitation(row: PermissionRow) {
+  return citation(row)
+    .replace(/^[가-힣]+(특별시|광역시|특별자치시|특별자치도|도)\s*도시계획\s*조례/, "조례")
+    .trim();
+}
+
+/** 조건 문구 정리: 앞머리 "중 " 제거, 가운뎃점을 쉼표로, 중복 제거. */
+function tidyCondition(parts: string[]) {
+  const cleaned = parts
+    .map((part) =>
+      part
+        .replace(/^\s*중\s+/, "")
+        .replace(/\s*[·ㆍ]\s*/g, ", ")
+        .trim()
+    )
+    .filter(Boolean);
+  return Array.from(new Set(cleaned)).join(". ");
+}
+
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const pnu = params.get("pnu")?.trim() ?? "";
@@ -201,6 +221,16 @@ export async function GET(request: NextRequest) {
         .sort()
         .at(-1) ?? "";
 
+    const limitRow = limitRows[0] ?? null;
+
+    // 2026-11-23 수정: 조례 용적률로 연면적을 낮추는 계산을 판정 문구를 만들기 "전"에 한다.
+    // 예전에는 문구를 다 만든 뒤에 낮춰서, 제2종일반주거 34,754㎡ 필지가
+    // "법정 최대 연면적 86,885㎡"(시행령 250%)로 표시되고 아래 규모(200%, 69,508㎡)와 어긋났다.
+    if (limitRow?.max_far_pct && siteAreaSqm && siteAreaSqm > 0) {
+      const ordinanceGfa = siteAreaSqm * (limitRow.max_far_pct / 100);
+      requestedGfa = requestedGfa ? Math.min(requestedGfa, ordinanceGfa) : ordinanceGfa;
+    }
+
     const results = facilities.map((facility) => {
       const key = facility.facility_key;
       const mine = rows.filter((row) => row.facility_key === key);
@@ -210,6 +240,9 @@ export async function GET(request: NextRequest) {
       let decision: Decision;
       let confidence: number;
       const reasons: string[] = [];
+      // 화면 표에 쓰는 구조화 값. reason(긴 문장)은 기존 사용처를 위해 그대로 둔다.
+      const conditions: string[] = [];
+      const basisRefs: string[] = [];
       let maxGfaSqm: number | null = null;
 
       const capOf = (list: PermissionRow[]) => {
@@ -228,12 +261,19 @@ export async function GET(request: NextRequest) {
           confidence = 0.95;
           reasons.push(`${citation(direct)} — 조례 없이 건축할 수 있는 건축물`);
           if (direct.condition_note) reasons.push(direct.condition_note);
+          if (direct.condition_note) conditions.push(direct.condition_note);
+          basisRefs.push(shortCitation(direct));
           maxGfaSqm = capOf(national.filter((row) => row.permission === "ALLOWED"));
         } else if (viaOrdinance && hasLocalLayer && local.length) {
           decision = "CONDITIONAL";
           confidence = 0.9;
           reasons.push(`${citation(viaOrdinance)} — 조례로 정하는 바에 따라 건축 가능`);
           for (const row of local) reasons.push(`${citation(row)} — ${row.condition_note ?? "열거됨"}`);
+          for (const row of local) {
+            if (row.condition_note) conditions.push(row.condition_note);
+            basisRefs.push(shortCitation(row));
+          }
+          if (!conditions.length) conditions.push("조례 별표 열거 범위 안에서 가능");
           maxGfaSqm = capOf(local) ?? capOf(national);
         } else if (viaOrdinance && hasLocalLayer) {
           decision = "PROHIBITED";
@@ -241,17 +281,23 @@ export async function GET(request: NextRequest) {
           reasons.push(
             `${citation(viaOrdinance)}은 조례 위임 사항인데 ${localName} 조례 별표에 열거되어 있지 않습니다.`
           );
+          conditions.push(`조례 위임 사항이나 ${localName} 조례 별표에 없음`);
+          basisRefs.push(shortCitation(viaOrdinance));
         } else if (viaOrdinance) {
           decision = "REVIEW";
           confidence = 0.5;
           reasons.push(
             `${citation(viaOrdinance)} — 조례로 정하는 바에 따릅니다. 해당 지자체 도시·군계획조례 별표를 확인해야 확정됩니다.`
           );
+          conditions.push("해당 지자체 조례 별표 확인 필요");
+          basisRefs.push(shortCitation(viaOrdinance));
           maxGfaSqm = capOf(national);
         } else {
           decision = "PROHIBITED";
           confidence = 0.9;
           reasons.push(`${zone.zone_name_kr} 별표에 열거되지 않은 용도입니다.`);
+          conditions.push(`${zone.zone_name_kr} 별표에 열거되지 않음`);
+          basisRefs.push("별표 미열거");
         }
       } else {
         const fullBan = mine.find((row) => row.permission === "PROHIBITED" && row.scope === "FULL");
@@ -266,25 +312,36 @@ export async function GET(request: NextRequest) {
           confidence = 0.95;
           reasons.push(`${citation(fullBan)} — 건축할 수 없는 건축물`);
           if (fullBan.condition_note) reasons.push(fullBan.condition_note);
+          conditions.push(fullBan.condition_note ?? "건축할 수 없는 건축물");
+          basisRefs.push(shortCitation(fullBan));
         } else if (localBan) {
           decision = "PROHIBITED";
           confidence = 0.9;
           reasons.push(`${citation(localBan)} — 조례가 금지한 건축물`);
+          conditions.push("조례가 금지한 건축물");
+          basisRefs.push(shortCitation(localBan));
         } else if (ordinanceBan && !hasLocalLayer) {
           decision = "REVIEW";
           confidence = 0.5;
           reasons.push(
             `${citation(ordinanceBan)} — 조례로 정하는 바에 따라 제한될 수 있습니다. 해당 지자체 조례를 확인해야 합니다.`
           );
+          conditions.push("조례로 제한될 수 있어 해당 지자체 조례 확인 필요");
+          basisRefs.push(shortCitation(ordinanceBan));
         } else if (partial.length) {
           decision = "CONDITIONAL";
           confidence = 0.85;
           for (const row of partial) reasons.push(`${citation(row)} — ${row.condition_note ?? "일부 세부유형만 제한"}`);
+          for (const row of partial) {
+            conditions.push(row.condition_note ?? "일부 세부유형만 제한");
+            basisRefs.push(shortCitation(row));
+          }
           maxGfaSqm = capOf(partial);
         } else {
           decision = "ALLOWED";
           confidence = 0.9;
           reasons.push(`${zone.zone_name_kr} 금지 목록에 열거되지 않은 용도입니다.`);
+          basisRefs.push("금지 목록 미열거");
         }
       }
 
@@ -292,6 +349,7 @@ export async function GET(request: NextRequest) {
       const roadRow = mine.find((row) => hasRoadCondition(row.condition_note));
       if (roadRow && decision === "ALLOWED") decision = "CONDITIONAL";
       if (roadRow) reasons.push("접도 조건이 있어 대지가 접한 도로 폭을 확인해야 합니다.");
+      if (roadRow) conditions.push("대지가 접한 도로 폭 확인 필요");
 
       // 이격거리 규정 — 주거지역 경계와의 거리를 계산해야 확정된다.
       const distance = distances.find(
@@ -303,6 +361,10 @@ export async function GET(request: NextRequest) {
         reasons.push(
           `${distance.statute_ref} — ${distance.reference_feature}로부터 ${distance.hard_ban_distance_m ?? 0}m 이내 불가` +
             (distance.review_distance_m ? `, ${distance.review_distance_m}m까지 심의 대상` : "")
+        );
+        conditions.push(
+          `${distance.reference_feature}로부터 ${distance.hard_ban_distance_m ?? 0}m 이내 불가` +
+            (distance.review_distance_m ? `, ${distance.review_distance_m}m까지 심의` : "")
         );
       }
 
@@ -326,20 +388,15 @@ export async function GET(request: NextRequest) {
         activityCode: null,
         activityName: null,
         maxGfaSqm,
+        conditionText: tidyCondition(conditions),
+        basis: Array.from(new Set(basisRefs)).join(", "),
       };
     });
 
     const caveatText = caveats.map((row) => `${row.statute_ref} ${row.clause}: ${row.caveat_text}`);
 
-    const limitRow = limitRows[0] ?? null;
-
-    // 프론트가 넘긴 연면적은 국가 상한 기준이다. 조례 용적률이 더 엄격하면 그쪽으로 낮춘다.
-    if (limitRow?.max_far_pct && siteAreaSqm && siteAreaSqm > 0) {
-      const ordinanceGfa = siteAreaSqm * (limitRow.max_far_pct / 100);
-      requestedGfa = requestedGfa ? Math.min(requestedGfa, ordinanceGfa) : ordinanceGfa;
-    }
-
     return NextResponse.json({
+      effectiveGfaSqm: requestedGfa,
       ok: true,
       zone: { ucode: zone.ucode, name: zone.zone_name_kr, listType },
       ordinanceLimit: limitRow

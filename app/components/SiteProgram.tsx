@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 
-// STEP 2 · 자동 조회값
+// STEP 2 자동 조회값
 // 2026-09-03 확정 구조에 따라 기존 Part 1의 REGULATION · USE · CAPACITY를
 // STEP 2로 옮긴 컴포넌트. 탭으로 나누지 않고, 필지가 정해주는 값을 한 번에 조회해
 // 위에서 아래로 보여준다(시안: 왼쪽 "자동 · 필지가 정해줍니다" 열).
@@ -9,7 +9,7 @@
 // STEP 1(SiteAnalyzer)이 sessionStorage["inrealtylab.step1"]에 남긴
 // { pnus, siteAreaSqm, center }를 읽어 동작한다.
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { ZONE_OVERRIDE_OPTIONS, findNationalZoneLimit } from "@/lib/zone-limits";
 
 const STEP1_KEY = "inrealtylab.step1";
@@ -56,6 +56,9 @@ type AllowedUseFacility = {
   activityCode: string | null;
   activityName: string | null;
   maxGfaSqm?: number | null;
+  // 2026-11-23: 표 표시용 구조화 값 (/api/allowed-use)
+  conditionText?: string;
+  basis?: string;
 };
 
 type AllowedUseData = {
@@ -101,13 +104,6 @@ function decisionLabel(decision: AllowedUseDecision) {
   if (decision === "CONDITIONAL") return "조건부";
   if (decision === "PROHIBITED") return "불가";
   return "추가확인";
-}
-
-function decisionTone(decision: AllowedUseDecision): "ok" | "pending" | "warn" | "neutral" {
-  if (decision === "ALLOWED") return "ok";
-  if (decision === "CONDITIONAL" || decision === "PROHIBITED") return "warn";
-  if (decision === "REVIEW") return "pending";
-  return "neutral";
 }
 
 function readSnapshot(): Step1Snapshot | null {
@@ -379,12 +375,33 @@ export default function SiteProgram() {
     });
   }, [effectiveLimit, totalArea]);
 
+
+  // ── 화면 표시용 정리 (2026-11-23 개편) ──
+  // 같은 이름이 여러 번 잡히는 VWorld 중첩 결과(도시지역 3회, 토지거래허가구역 2회 등)를 이름 기준으로 한 번만 보여준다.
+  const uniqueNames = (items: RegulationHit[]) => Array.from(new Set(items.map((item) => item.name)));
+
+  const decisionOrder: AllowedUseDecision[] = ["ALLOWED", "CONDITIONAL", "REVIEW", "PROHIBITED"];
+  const decisionGroupTitle: Record<AllowedUseDecision, string> = {
+    ALLOWED: "가능 (조례 없이 건축)",
+    CONDITIONAL: "조건부 (조례 열거 범위, 면적 및 접도 조건 안에서만)",
+    REVIEW: "추가확인 (지자체 조례 확인 필요)",
+    PROHIBITED: "불가",
+  };
+  const facilitiesByDecision = (decision: AllowedUseDecision) =>
+    (allowedUse?.facilities ?? []).filter((facility) => facility.decision === decision);
+  const decisionCounts = decisionOrder
+    .map((decision) => ({ decision, count: facilitiesByDecision(decision).length }))
+    .filter((item) => item.count > 0);
+
+  const pyeong = (sqm: number) => `${Math.round(sqm / 3.305785).toLocaleString("ko-KR")}평`;
+  const equivalentFloors = capacityScenarios[0]?.equivalentFloors ?? 0;
+
   if (!snapshot) {
     return (
       <section className="control-section">
-        <div className="control-section-title"><span>STEP 2 · 자동</span><strong>필지가 정해주는 값</strong></div>
+        <div className="control-section-title"><span>STEP 2 자동 조회</span><strong>필지가 정해주는 값</strong></div>
         <div className="regime-note">
-          현황분석에서 필지를 선택하면 용도지역·건폐율·용적률과 지을 수 있는 용도를 여기에서 자동으로 조회합니다.
+          현황분석에서 필지를 선택하면 용도지역, 건폐율, 용적률과 지을 수 있는 용도를 여기에서 자동으로 조회합니다.
         </div>
       </section>
     );
@@ -393,7 +410,7 @@ export default function SiteProgram() {
   if (!snapshot.center) {
     return (
       <section className="control-section">
-        <div className="control-section-title"><span>STEP 2 · 자동</span><strong>필지가 정해주는 값</strong></div>
+        <div className="control-section-title"><span>STEP 2 자동 조회</span><strong>필지가 정해주는 값</strong></div>
         <div className="control-warning">
           선택 필지의 위치 정보가 없어 규제정보를 조회하지 못했습니다. 현황분석 화면에서 필지를 다시 선택해 주세요.
         </div>
@@ -401,299 +418,280 @@ export default function SiteProgram() {
     );
   }
 
+  const regulationChips = regulation
+    ? [
+        { title: "용도지구", names: uniqueNames(regulation.districts), warn: false },
+        { title: "용도구역", names: uniqueNames(regulation.areas), warn: true },
+        { title: "지구단위계획", names: uniqueNames(regulation.districtPlans), warn: true },
+        { title: "개발행위 제한", names: uniqueNames(regulation.developmentRestrictions), warn: true },
+        { title: "토지거래허가구역", names: uniqueNames(regulation.landTransactionPermit), warn: true },
+      ]
+    : [];
+
   return (
-    <section className="control-section">
-      <div className="control-section-title">
-        <span>STEP 2 · 자동</span>
-        <strong>필지가 정해주는 값</strong>
+    <section className="control-section s2">
+      <div className="s2-head">
+        <div className="control-section-title" style={{ marginBottom: 0 }}>
+          <span>STEP 2 자동 조회</span>
+          <strong>필지가 정해주는 값</strong>
+        </div>
+        <div className={`s2-zone${zoneOverride ? " active" : ""}`}>
+          <label htmlFor="zone-override-select">용도지역 가정 (종상향 검토 시 변경)</label>
+          <div className="s2-zone-row">
+            <select
+              id="zone-override-select"
+              value={zoneOverride ?? ""}
+              onChange={(event) => setZoneOverride(event.target.value || null)}
+            >
+              <option value="">실제 조회값 사용{regulation?.primaryZone ? ` (${regulation.primaryZone})` : ""}</option>
+              {ZONE_OVERRIDE_OPTIONS.map((zoneName) => (
+                <option key={zoneName} value={zoneName}>{zoneName}</option>
+              ))}
+            </select>
+            {zoneOverride && (
+              <button type="button" onClick={() => setZoneOverride(null)}>되돌리기</button>
+            )}
+          </div>
+        </div>
       </div>
-      <div className="regime-note">고를 수 있는 값이 아니라 조회된 값입니다. 대지 {formatArea(totalArea)} 기준.</div>
+
+      {zoneOverride && (
+        <div className="s2-override-note">
+          <strong>가정 적용 중</strong> 실제 용도지역은 {regulation?.primaryZone ?? "확인 필요"}. 아래 값과 STEP 3 사업성은 전부{" "}
+          {zoneOverride} 가정 기준이며 법적으로 확정된 값이 아님
+        </div>
+      )}
 
       {loading && <div className="regime-note">공공데이터를 조회하고 있습니다...</div>}
-
-      {/* ── 용도지역 가정변경 (시나리오) ── */}
-      {/* 종상향 등을 전제로 사업성을 검토하고 싶을 때 쓰는 입력. 실제 조회값은 절대
-          지우지 않고 아래에 같이 표시해, 가정과 사실을 헷갈리지 않게 한다. */}
-      <div className={`zone-override-card${zoneOverride ? " active" : ""}`}>
-        <div className="zone-override-head">
-          <span>시나리오</span>
-          <strong>용도지역 가정변경</strong>
-        </div>
-        <div className="zone-override-row">
-          <label htmlFor="zone-override-select">가정할 용도지역</label>
-          <select
-            id="zone-override-select"
-            value={zoneOverride ?? ""}
-            onChange={(event) => setZoneOverride(event.target.value || null)}
-          >
-            <option value="">실제 조회값 사용{regulation?.primaryZone ? ` (${regulation.primaryZone})` : ""}</option>
-            {ZONE_OVERRIDE_OPTIONS.map((zoneName) => (
-              <option key={zoneName} value={zoneName}>{zoneName}</option>
-            ))}
-          </select>
-          {zoneOverride && (
-            <button type="button" onClick={() => setZoneOverride(null)}>실제 조회값으로 되돌리기</button>
-          )}
-        </div>
-        {zoneOverride ? (
-          <p className="zone-override-note">
-            실제 조회된 용도지역은 <strong>{regulation?.primaryZone ?? "확인 필요"}</strong>입니다. 지금부터 아래 건폐율·용적률·개발가능
-            규모·허용용도·STEP 3 사업성은 전부 <strong>{zoneOverride}</strong>(으)로 가정했을 때의 값이며, 법적으로 확정된 용도지역이
-            아닙니다.
-          </p>
-        ) : (
-          <p className="zone-override-note muted">종상향 등 다른 용도지역을 전제로 검토하고 싶으면 여기서 선택하세요. 선택 전까지는 실제 조회값 그대로 계산합니다.</p>
-        )}
-      </div>
-
-      {/* ── 법적 규제 ── */}
       {regulationError && <div className="control-error">{regulationError}</div>}
+
+      {/* ── 핵심 수치 ── */}
       {regulation && (
-        <>
-          <div className="metric-grid">
-            <div>
-              <span>주요 용도지역{zoneOverride ? " (가정)" : ""}</span>
-              <strong>{effectiveZoneName ?? "확인 필요"}</strong>
-              {zoneOverride && <small>실제 조회값 {regulation.primaryZone ?? "확인 필요"}</small>}
-            </div>
-            <div>
-              <span>건폐율 상한</span>
-              <strong>{effectiveLimit ? formatPct(effectiveLimit.bcrMax) : "-"}</strong>
-            </div>
-            <div>
-              <span>용적률 상한</span>
-              <strong>{effectiveLimit ? formatPct(effectiveLimit.farMax) : "-"}</strong>
-            </div>
+        <div className="s2-kpis">
+          <div>
+            <span>대지면적</span>
+            <strong>{formatArea(totalArea)}</strong>
+            <small>{pyeong(totalArea)}</small>
           </div>
-
-          <div className="regulation-groups">
-            <RegulationGroup title="용도지역" items={regulation.useZones} />
-            <RegulationGroup title="용도지구" items={regulation.districts} />
-            <RegulationGroup title="용도구역" items={regulation.areas} />
-            <RegulationGroup title="지구단위계획" items={regulation.districtPlans} />
-            <RegulationGroup title="개발행위 제한" items={regulation.developmentRestrictions} />
-            <RegulationGroup title="토지거래허가" items={regulation.landTransactionPermit} />
+          <div>
+            <span>용도지역{zoneOverride ? " (가정)" : ""}</span>
+            <strong className="s2-kpi-text">{effectiveZoneName ?? "확인 필요"}</strong>
+            <small>{zoneOverride ? `실제 ${regulation.primaryZone ?? "확인 필요"}` : "VWorld 공간중첩"}</small>
           </div>
+          <div>
+            <span>건폐율 상한</span>
+            <strong>{effectiveLimit ? formatPct(effectiveLimit.bcrMax) : "-"}</strong>
+            <small>
+              {effectiveLimit?.bindsBcr ? `조례 적용 (시행령 ${formatPct(effectiveLimit.nationalBcr)})` : ordinanceLimit ? "시행령, 조례 동일" : "시행령 기준"}
+            </small>
+          </div>
+          <div>
+            <span>용적률 상한</span>
+            <strong>{effectiveLimit ? formatPct(effectiveLimit.farMax) : "-"}</strong>
+            <small>
+              {effectiveLimit?.bindsFar ? `조례 적용 (시행령 ${formatPct(effectiveLimit.nationalFar)})` : ordinanceLimit ? "시행령, 조례 동일" : "시행령 기준"}
+            </small>
+          </div>
+          <div className="s2-kpi-key">
+            <span>법정 최대 연면적</span>
+            <strong>{statutoryCapacity ? formatArea(statutoryCapacity.grossFloorArea) : "-"}</strong>
+            <small>
+              {statutoryCapacity ? `${pyeong(statutoryCapacity.grossFloorArea)}, 건축면적 ${formatArea(statutoryCapacity.footprint)}` : "상한 확인 후 계산"}
+            </small>
+          </div>
+        </div>
+      )}
 
-          {regulation.statutoryLimit && effectiveLimit && (
-            <div className="source-note">
-              <strong>{effectiveLimit.legalBasis}</strong>
-              <span>시행기준 {regulation.statutoryLimit.effectiveDate}</span>
-              <p>{regulation.statutoryLimit.scope}</p>
-              {(effectiveLimit.bindsBcr || effectiveLimit.bindsFar) && (
-                <p>
-                  국가 시행령 상한(건폐율 {formatPct(effectiveLimit.nationalBcr)} · 용적률{" "}
-                  {formatPct(effectiveLimit.nationalFar)})보다 조례가 더 엄격해 조례 값을 적용했습니다.
-                </p>
-              )}
-            </div>
-          )}
+      {/* ── 규제 중첩 ── */}
+      {regulation && (
+        <div className="s2-block">
+          <div className="s2-block-head">
+            <strong>규제 중첩</strong>
+            <span>{effectiveLimit ? `${effectiveLimit.legalBasis.replace(/\s*[·ㆍ]\s*/g, ", ")}, 시행기준 ${regulation.statutoryLimit?.effectiveDate ?? "-"}` : ""}</span>
+          </div>
+          <div className="s2-chips">
+            {regulationChips.map((chip) =>
+              chip.names.length ? (
+                <span key={chip.title} className={`s2-chip${chip.warn ? " warn" : " on"}`}>
+                  {chip.title === "토지거래허가구역" ? "토지거래허가구역 해당" : `${chip.title}: ${chip.names.join(", ")}`}
+                </span>
+              ) : (
+                <span key={chip.title} className="s2-chip"><i aria-hidden="true" />{chip.title} 없음</span>
+              )
+            )}
+          </div>
           {regulation.warnings.map((warning) => <div className="control-warning" key={warning}>{warning}</div>)}
-        </>
+        </div>
       )}
 
       {/* ── 지을 수 있는 용도 ── */}
-      <div className="control-section-title" style={{ marginTop: 26 }}>
-        <span>지을 수 있는 용도</span>
-        <strong>지을 수 있는 용도</strong>
-      </div>
-      {allowedUseError && <div className="control-error">{allowedUseError}</div>}
-      {allowedUse && (
-        <>
-          <div className="metric-grid">
-            <div><span>기준 용도지역{zoneOverride ? " (가정)" : ""}</span><strong>{effectiveZoneName ?? "추가확인"}</strong></div>
-            <div><span>건축 가능 용도</span><strong>{allowedUse.diagnostics.matchedFacilityCount}/{allowedUse.facilities.length}</strong></div>
-            <div><span>기준일</span><strong>{allowedUse.source.baseDate}</strong></div>
-          </div>
-
-          <AllowedUseGroup title="업무시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "OFFICE")} />
-          <AllowedUseGroup title="판매·근린생활시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "RETAIL")} />
-          <AllowedUseGroup title="기타 수익시설" facilities={allowedUse.facilities.filter((facility) => !["OFFICE", "RETAIL", "PUBLIC"].includes(facility.group))} />
-          <AllowedUseGroup title="공공·필수시설" facilities={allowedUse.facilities.filter((facility) => facility.group === "PUBLIC")} />
-
-          {allowedUse.caveats?.length ? (
-            <div className="control-warning">
-              <strong>항 단서</strong>
-              <ul className="unresolved-list" style={{ marginTop: 8 }}>
-                {allowedUse.caveats.map((caveat) => (
-                  <li key={caveat}>{caveat}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          <div className="source-note">
-            <strong>{allowedUse.source.name}</strong>
-            <span>기준일 {allowedUse.source.baseDate} · 조문 {allowedUse.diagnostics.activityCatalogCount}행</span>
-            <p>{allowedUse.source.note}</p>
-          </div>
-
-          {regulation?.districtPlans.length ? (
-            <div className="control-warning">
-              지구단위계획구역이 중첩되어 있습니다. 여기의 행위제한 1차 판정 외에 지구단위계획 결정도서의 허용용도·불허용도를 반드시 추가 확인해야 합니다.
-            </div>
-          ) : null}
-          {snapshot.pnus.length > 1 && (
-            <div className="control-warning">현재 용도 판정은 대표 필지 1개 기준입니다. 복수 필지의 용도지역이 다르면 필지별 판정으로 확장해야 합니다.</div>
+      <div className="s2-block">
+        <div className="s2-block-head">
+          <strong>지을 수 있는 용도</strong>
+          {allowedUse && (
+            <span>
+              {allowedUse.facilities.length}개 용도 중 {allowedUse.diagnostics.matchedFacilityCount}개 건축 가능, 기준일 {allowedUse.source.baseDate}
+            </span>
           )}
-        </>
-      )}
+        </div>
+        {allowedUseError && <div className="control-error">{allowedUseError}</div>}
+        {allowedUse && (
+          <>
+            <div className="s2-counts">
+              {decisionCounts.map((item) => (
+                <span key={item.decision} className={`s2-badge ${item.decision.toLowerCase()}`}>
+                  {decisionLabel(item.decision)} {item.count}
+                </span>
+              ))}
+            </div>
+            <div className="s2-table-wrap">
+              <table className="s2-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 78 }}>판정</th>
+                    <th>용도</th>
+                    <th>바닥면적 상한</th>
+                    <th>조건</th>
+                    <th>근거</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {decisionOrder.map((decision) => {
+                    const rows = facilitiesByDecision(decision);
+                    if (!rows.length) return null;
+                    return (
+                      <Fragment key={decision}>
+                        <tr className="s2-group-row"><td colSpan={5}>{decisionGroupTitle[decision]}</td></tr>
+                        {rows.map((facility) => (
+                          <tr key={facility.key}>
+                            <td><span className={`s2-badge ${decision.toLowerCase()}`}>{decisionLabel(decision)}</span></td>
+                            <td className="s2-use">{facility.label}</td>
+                            <td className="s2-num">{facility.maxGfaSqm ? `${facility.maxGfaSqm.toLocaleString("ko-KR")}㎡ 미만` : "-"}</td>
+                            <td>{facility.conditionText || "-"}</td>
+                            <td className="s2-ref">{facility.basis || "-"}</td>
+                          </tr>
+                        ))}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <ul className="s2-foot">
+              {statutoryCapacity && (
+                <li>
+                  바닥면적 상한은 해당 용도 합계 기준. 상한이 있는 용도는 단독으로 법정 최대 연면적({formatArea(statutoryCapacity.grossFloorArea)})을 채울 수 없음
+                </li>
+              )}
+              <li>{allowedUse.source.name}. {allowedUse.source.note}</li>
+            </ul>
 
-      {/* ── 개발가능 규모 ── */}
-      <div className="control-section-title" style={{ marginTop: 26 }}>
-        <span>개발가능 규모</span>
-        <strong>개발가능 규모</strong>
+            {allowedUse.caveats?.length ? (
+              <details className="s2-details">
+                <summary>층수 단서 {allowedUse.caveats.length}건 보기</summary>
+                <ul>
+                  {allowedUse.caveats.map((caveat) => (
+                    <li key={caveat}>{caveat.replace(/\s*[·ㆍ]\s*/g, ", ")}</li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+
+            {regulation?.districtPlans.length ? (
+              <div className="control-warning">
+                지구단위계획구역 중첩. 결정도서의 허용용도와 불허용도를 반드시 추가 확인해야 함
+              </div>
+            ) : null}
+            {snapshot.pnus.length > 1 && (
+              <div className="control-warning">용도 판정은 대표 필지 1개 기준. 필지별 용도지역이 다르면 필지별 판정 필요</div>
+            )}
+          </>
+        )}
       </div>
+
+      {/* ── 개발가능 규모 + 반영 상태 ── */}
       {regulation && effectiveLimit && statutoryCapacity ? (
-        <>
-          <div className="capacity-basis">
-            <span>현재 계산 기준{zoneOverride ? " (가정)" : ""}</span>
-            <strong>{effectiveZoneName ?? "-"}</strong>
-            <p>대지 {formatArea(totalArea)} · BCR {formatPct(effectiveLimit.bcrMax)} · FAR {formatPct(effectiveLimit.farMax)}</p>
-            {zoneOverride && <p>실제 조회된 용도지역은 {regulation.primaryZone ?? "확인 필요"}입니다.</p>}
-          </div>
-
-          <div className="metric-grid capacity-metrics">
-            <div>
-              <span>적용 대지면적</span>
-              <strong>{formatArea(totalArea)}</strong>
-              <small>{(totalArea / 3.305785).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</small>
+        <div className="s2-split">
+          <div className="s2-block s2-capacity">
+            <div className="s2-block-head">
+              <strong>개발가능 규모</strong>
+              <span>보수, 기준안은 사업검토 가정이며 법적 기준 아님</span>
             </div>
-            <div>
-              <span>법정 최대 건축면적</span>
-              <strong>{formatArea(statutoryCapacity.footprint)}</strong>
-              <small>BCR {formatPct(effectiveLimit.bcrMax)}</small>
+            <div className="s2-table-wrap">
+              <table className="s2-table s2-scenario">
+                <thead>
+                  <tr>
+                    <th>구분</th>
+                    {capacityScenarios.map((scenario) => (
+                      <th key={scenario.name} className={scenario.status === "STATUTORY" ? "key" : undefined}>
+                        {scenario.status === "STATUTORY" ? "법정 최대" : scenario.name === "보수 검토" ? "보수 (법정 80%)" : "기준 (법정 90%)"}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td>건폐율</td>{capacityScenarios.map((s) => <td key={s.name} className={s.status === "STATUTORY" ? "key" : undefined}>{formatPct(s.bcr)}</td>)}</tr>
+                  <tr><td>용적률</td>{capacityScenarios.map((s) => <td key={s.name} className={s.status === "STATUTORY" ? "key" : undefined}>{formatPct(s.far)}</td>)}</tr>
+                  <tr><td>건축면적</td>{capacityScenarios.map((s) => <td key={s.name} className={s.status === "STATUTORY" ? "key" : undefined}>{formatArea(s.footprint)}</td>)}</tr>
+                  <tr><td>연면적</td>{capacityScenarios.map((s) => <td key={s.name} className={s.status === "STATUTORY" ? "key" : undefined}>{formatArea(s.grossFloorArea)}</td>)}</tr>
+                  <tr><td>연면적 (평)</td>{capacityScenarios.map((s) => <td key={s.name} className={s.status === "STATUTORY" ? "key" : undefined}>{pyeong(s.grossFloorArea)}</td>)}</tr>
+                </tbody>
+              </table>
             </div>
-            <div>
-              <span>법정 최대 연면적</span>
-              <strong>{formatArea(statutoryCapacity.grossFloorArea)}</strong>
-              <small>FAR {formatPct(effectiveLimit.farMax)}</small>
-            </div>
+            <ul className="s2-foot">
+              <li>
+                단순 환산층수 {equivalentFloors.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}층 (연면적 / 건축면적, 세 안 동일). 실제 층수는
+                높이, 일조, 도로, 주차, 코어 및 산입 제외면적, 개별법 검토 후 확정
+              </li>
+            </ul>
           </div>
 
-          <div className="capacity-subtitle">
-            <strong>규모 시나리오</strong>
-            <span>보수/기준안은 사업검토 가정이며 법적 기준이 아닙니다.</span>
-          </div>
-
-          <div className="scenario-list">
-            {capacityScenarios.map((scenario) => (
-              <article className={`scenario-card ${scenario.status === "STATUTORY" ? "statutory" : ""}`} key={scenario.name}>
-                <div className="scenario-head">
-                  <strong>{scenario.name}</strong>
-                  <span>{scenario.note}</span>
-                </div>
-                <dl>
-                  <div><dt>건폐율</dt><dd>{formatPct(scenario.bcr)}</dd></div>
-                  <div><dt>용적률</dt><dd>{formatPct(scenario.far)}</dd></div>
-                  <div><dt>건축면적</dt><dd>{formatArea(scenario.footprint)}</dd></div>
-                  <div><dt>연면적</dt><dd>{formatArea(scenario.grossFloorArea)}</dd></div>
-                  <div><dt>연면적(평)</dt><dd>{scenario.grossFloorAreaPyeong.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}평</dd></div>
-                  <div><dt>단순 환산층수</dt><dd>{scenario.equivalentFloors.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}층</dd></div>
-                </dl>
-              </article>
-            ))}
-          </div>
-
-          <div className="capacity-subtitle">
-            <strong>규제 반영 상태</strong>
-            <span>어떤 값이 계산에 들어갔는지 추적합니다.</span>
-          </div>
-          <div className="capacity-status-list">
+          <div className="s2-block s2-status">
+            <div className="s2-block-head"><strong>규제 반영 상태</strong></div>
             <CapacityStatus label="대지면적" status="반영" tone="ok" detail="VWorld 지적 필지" />
             <CapacityStatus
               label="용도지역"
               status={zoneOverride ? "가정 적용" : "반영"}
               tone={zoneOverride ? "warn" : "ok"}
-              detail={
-                zoneOverride
-                  ? `${effectiveZoneName} 가정 (실제 조회값 ${regulation.primaryZone ?? "확인 필요"})`
-                  : regulation.primaryZone ?? "세부지역 확인 필요"
-              }
-            />
-            <CapacityStatus label="건축 가능시설" status={allowedUse ? "판정" : "미조회"} tone={allowedUse ? "ok" : "pending"} detail={allowedUse ? allowedUse.source.name : "판정 실패"} />
-            <CapacityStatus
-              label="국가 건폐율·용적률"
-              status="반영"
-              tone="ok"
-              detail={nationalLimitForEffectiveZone?.legalBasis ?? "국토계획법 시행령"}
+              detail={zoneOverride ? `${effectiveZoneName} 가정 (실제 ${regulation.primaryZone ?? "확인 필요"})` : regulation.primaryZone ?? "세부지역 확인 필요"}
             />
             <CapacityStatus
-              label="조례 건폐율·용적률"
-              status={ordinanceLimit ? "반영" : "미반영"}
+              label="건축 가능시설"
+              status={allowedUse ? "판정" : "미조회"}
+              tone={allowedUse ? "ok" : "pending"}
+              detail={allowedUse ? "시행령 별표, 조례 별표" : "판정 실패"}
+            />
+            <CapacityStatus
+              label="건폐율, 용적률"
+              status={ordinanceLimit ? "조례까지 반영" : "시행령만 반영"}
               tone={ordinanceLimit ? "ok" : "pending"}
               detail={
                 ordinanceLimit
-                  ? `${ordinanceLimit.legalBasis} · 건폐율 ${ordinanceLimit.bcrMaxPct ?? "-"}% · 용적률 ${ordinanceLimit.farMaxPct ?? "-"}%`
-                  : "해당 지자체 조례 상한 미확보 — 국가 상한으로 계산"
+                  ? `${ordinanceLimit.legalBasis.replace(/\s*[·ㆍ]\s*/g, ", ")} (${ordinanceLimit.bcrMaxPct ?? "-"}%, ${ordinanceLimit.farMaxPct ?? "-"}%)`
+                  : "지자체 조례 상한 미확보"
               }
             />
             <CapacityStatus
-              label="지자체 조례"
+              label="조례 별표"
               status={allowedUse?.diagnostics.hasLocalLayer ? "반영" : "미반영"}
               tone={allowedUse?.diagnostics.hasLocalLayer ? "ok" : "pending"}
               detail={
                 allowedUse?.diagnostics.hasLocalLayer
-                  ? `조례 별표 ${allowedUse.diagnostics.localRuleCount ?? 0}개 항목 반영`
-                  : "해당 지자체 조례 별표 미확보 — 조례 위임 항목은 추가확인"
+                  ? `${allowedUse.diagnostics.localRuleCount ?? 0}개 항목`
+                  : "조례 위임 항목은 추가확인"
               }
             />
             <CapacityStatus
-              label="지구단위계획 세부지침"
+              label="지구단위계획"
               status={regulation.districtPlans.length ? "검토 필요" : "중첩 없음"}
               tone={regulation.districtPlans.length ? "warn" : "neutral"}
-              detail={regulation.districtPlans.length ? regulation.districtPlans.map((item) => item.name).join(", ") : "공간중첩 기준"}
+              detail={regulation.districtPlans.length ? uniqueNames(regulation.districtPlans).join(", ") : "공간중첩 기준"}
             />
-            <CapacityStatus label="인센티브 / 특례" status="미반영" tone="pending" detail="승인된 Regulation Rule만 향후 자동 적용" />
+            <CapacityStatus label="인센티브, 특례" status="미반영" tone="pending" detail="승인된 규칙만 향후 자동 적용" />
           </div>
-
-          <div className="control-warning">
-            단순 환산층수는 연면적 ÷ 건축면적의 기초 지표입니다. 실제 층수는 높이, 일조, 도로, 주차, 코어·공용부, 용적률 산입 제외면적, 지구단위계획 및 개별법 검토 후 달라집니다.
-          </div>
-        </>
-      ) : !loading && (
-        <div className="regime-note">세부 용도지역과 건폐율·용적률 기준이 확인되어야 규모를 계산할 수 있습니다.</div>
-      )}
-    </section>
-  );
-}
-
-function RegulationGroup({ title, items }: { title: string; items: RegulationHit[] }) {
-  return (
-    <section className="regulation-group">
-      <div className="regulation-group-head"><strong>{title}</strong><span>{items.length}건</span></div>
-      {items.length ? (
-        <ul>{items.map((item, index) => <li key={`${item.layer}-${item.name}-${index}`}><span>{item.name}</span><small>{item.label}</small></li>)}</ul>
-      ) : (
-        <p>중첩 없음</p>
-      )}
-    </section>
-  );
-}
-
-function AllowedUseGroup({ title, facilities }: { title: string; facilities: AllowedUseFacility[] }) {
-  return (
-    <section className="regulation-group">
-      <div className="regulation-group-head"><strong>{title}</strong><span>{facilities.length}개</span></div>
-      {facilities.length ? (
-        <div className="capacity-status-list">
-          {facilities.map((facility) => (
-            <CapacityStatus
-              key={facility.key}
-              label={facility.label}
-              status={decisionLabel(facility.decision)}
-              tone={decisionTone(facility.decision)}
-              detail={[
-                facility.maxGfaSqm ? `상한 ${facility.maxGfaSqm.toLocaleString("ko-KR")}㎡` : null,
-                facility.reason,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            />
-          ))}
         </div>
-      ) : (
-        <p>대상 시설 없음</p>
+      ) : !loading && (
+        <div className="regime-note">세부 용도지역과 건폐율, 용적률 기준이 확인되어야 규모를 계산할 수 있습니다.</div>
       )}
     </section>
   );
@@ -711,12 +709,12 @@ function CapacityStatus({
   detail: string;
 }) {
   return (
-    <div className="capacity-status-row">
+    <div className="s2-status-row">
       <div>
         <strong>{label}</strong>
         <small>{detail}</small>
       </div>
-      <span className={`status-chip ${tone}`}>{status}</span>
+      <span className={`s2-tag ${tone}`}>{status}</span>
     </div>
   );
 }
