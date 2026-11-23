@@ -142,7 +142,7 @@ export default function FacilityProgramPanel() {
           window.dispatchEvent(new CustomEvent(FACILITY_PROGRAM_EVENT, { detail: json.result }));
         }
       })
-      .catch(() => setData({ ok: false, message: "수요 기반 프로그램을 불러오지 못했습니다." }))
+      .catch(() => setData({ ok: false, message: "수요 기반 시설 도출 결과 조회 실패" }))
       .finally(() => setLoading(false));
   }, []);
 
@@ -159,12 +159,12 @@ export default function FacilityProgramPanel() {
   return (
     <section className="control-section">
       <div className="control-section-title">
-        <span>STEP 2 · 수요</span>
-        <strong>수요 기반 프로그램 도출</strong>
+        <span>STEP 2-3 수요 산출값</span>
+        <strong>수요 기반 시설 도출</strong>
       </div>
 
-      {!data && !loading && <div className="regime-note">용도지역과 연면적 상한이 확인되면 시설별 수요를 계산합니다.</div>}
-      {loading && <div className="regime-note">허용 시설별 수요와 지역 테마를 계산하는 중입니다.</div>}
+      {!data && !loading && <div className="regime-note">용도지역 및 연면적 상한 확인 후 시설별 수요 산정</div>}
+      {loading && <div className="regime-note">허용 시설별 수요 및 지역 테마 산정 중</div>}
       {data && !data.ok && <div className="regime-note">{data.message}</div>}
 
       {result && (
@@ -265,7 +265,7 @@ export default function FacilityProgramPanel() {
           )}
 
           <p className="choice-hint">
-            특허 10-2026-0144458 청구항 {result.patent_claims?.join(", ")} 적용. 수요 가정값은 모두 잠정값이며 검증 결과에 따라 보정됩니다.
+            특허 10-2026-0144458 청구항 {result.patent_claims?.join(", ")} 적용. 수요 가정값은 전부 잠정값이며 검증 결과에 따라 보정 예정
           </p>
         </>
       )}

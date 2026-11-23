@@ -45,42 +45,42 @@ const DEFAULT_SELECTION: StructureSelection = {
 const LAND_RIGHTS: Array<{ key: LandRight; title: string; desc: string }> = [
   {
     key: "CONCESSION",
-    title: "민간투자 · BTO · BOT",
-    desc: "민간투자법상 수익형. 시설 사용료 수입으로 회수합니다.",
+    title: "민간투자 (BTO, BOT)",
+    desc: "민간투자법상 수익형. 시설 사용료 수입으로 회수",
   },
   {
     key: "LEASE_PERMIT",
-    title: "대부 · 사용허가",
-    desc: "국공유재산을 빌려 직접 개발하고 운영합니다. 소유권은 그대로 공공에 남습니다.",
+    title: "대부 및 사용허가",
+    desc: "국공유재산 대부 후 직접 개발 및 운영. 소유권은 공공 유지",
   },
   {
     key: "TRUST",
-    title: "신탁 · 위탁개발",
-    desc: "국유재산법 제57조. 일반재산을 신탁·위탁해 개발하고 수익을 배분합니다.",
+    title: "신탁 및 위탁개발",
+    desc: "국유재산법 제57조. 일반재산 신탁 또는 위탁 개발 후 수익 배분",
   },
   {
     key: "MIXED",
     title: "혼합형",
-    desc: "동 또는 층별로 두 방식을 나누어 적용합니다.",
+    desc: "동 또는 층별로 두 방식 분리 적용",
   },
 ];
 
 const CONCESSION_TYPES: Array<{ key: ConcessionType; title: string; desc: string }> = [
-  { key: "BTO", title: "BTO", desc: "준공 즉시 이전. 관리운영권을 무형자산으로 상각합니다." },
-  { key: "BOT", title: "BOT", desc: "운영기간 동안 민간이 시설을 소유하고, 만료 시 이전합니다." },
+  { key: "BTO", title: "BTO", desc: "준공 즉시 소유권 이전. 관리운영권을 무형자산으로 상각" },
+  { key: "BOT", title: "BOT", desc: "운영기간 중 민간 소유, 만료 시 소유권 이전" },
 ];
 
 const VEHICLES: Array<{ key: Vehicle; title: string; desc: string }> = [
-  { key: "SPC", title: "프로젝트 SPC", desc: "시행법인을 직접 세워 개발하고, 운영수익으로 회수합니다." },
+  { key: "SPC", title: "프로젝트 SPC", desc: "시행법인 직접 설립 후 개발, 운영수익으로 회수" },
   {
     key: "PROJECT_REIT",
     title: "개발리츠",
-    desc: "부동산투자회사법상 위탁관리 리츠. 공공이 출자로 함께 들어오기 쉽고, 배당으로 회수합니다.",
+    desc: "부동산투자회사법상 위탁관리 리츠. 공공 출자 참여 용이, 배당으로 회수",
   },
   {
     key: "TRUSTEE",
     title: "신탁사",
-    desc: "수탁자가 시행합니다. 사업방식에서 신탁·위탁개발을 고르면 여기로 고정됩니다.",
+    desc: "수탁자 시행. 사업방식에서 신탁 및 위탁개발 선택 시 자동 고정",
   },
 ];
 
@@ -126,10 +126,10 @@ export default function StructureChoice() {
   return (
     <section className="control-section">
       <div className="control-section-title">
-        <span>STEP 2 · 선택</span>
-        <strong>내가 정하는 값</strong>
+        <span>STEP 2-2 사용자 설정값</span>
+        <strong>사업방식 및 사업주체</strong>
       </div>
-      <div className="regime-note">여기서 고른 값만 사업성 판정 결과를 바꿉니다.</div>
+      <div className="regime-note">이 항목의 선택값에 따라 STEP 3 사업성 판정 결과 변동</div>
 
       {/* ── 사업방식 ── */}
       <div className="choice-block">
@@ -137,7 +137,7 @@ export default function StructureChoice() {
           <strong>사업방식</strong>
           <em className="choice-required">필수</em>
         </div>
-        <p className="choice-hint">국공유지를 어떤 권원으로 확보하는지를 고릅니다.</p>
+        <p className="choice-hint">국공유지 확보 권원 선택</p>
         <div className="choice-grid">
           {LAND_RIGHTS.map((option) => (
             <button
@@ -159,7 +159,7 @@ export default function StructureChoice() {
           <div className="choice-sub">
             <div className="choice-sub-head">
               <strong>민간투자 세부 유형</strong>
-              <span>소유권이 언제 공공으로 넘어가는지</span>
+              <span>공공으로 소유권 이전 시점 기준</span>
             </div>
             <div className="choice-grid two">
               {CONCESSION_TYPES.map((option) => (
@@ -178,7 +178,7 @@ export default function StructureChoice() {
               ))}
             </div>
             <p className="choice-hint">
-              BOT는 시설을 민간이 보유하는 동안 재산세가 붙고 유형자산 감가상각이 잡힙니다. 같은 임대료라도 세후 현금흐름과 IRR이 달라집니다.
+              BOT는 민간 보유 기간 중 재산세 부과 및 유형자산 감가상각 발생. 같은 임대료라도 세후 현금흐름과 IRR 상이
             </p>
           </div>
         )}
@@ -187,10 +187,10 @@ export default function StructureChoice() {
       {/* ── 사업주체 ── */}
       <div className="choice-block">
         <div className="choice-head">
-          <strong>사업주체 · 자금조달</strong>
+          <strong>사업주체 및 자금조달</strong>
           <em className="choice-required">필수</em>
         </div>
-        <p className="choice-hint">사업방식과 별개 축입니다. 대부·사용허가에 리츠를 얹는 조합도 됩니다.</p>
+        <p className="choice-hint">사업방식과 별개 항목. 대부 및 사용허가에 리츠를 결합하는 구성도 가능</p>
         <div className="choice-grid three">
           {VEHICLES.map((option) => (
             <button
@@ -209,20 +209,20 @@ export default function StructureChoice() {
           ))}
         </div>
         {vehicleLocked && (
-          <p className="choice-hint">신탁·위탁개발을 골라서 사업주체가 신탁사로 고정되었습니다.</p>
+          <p className="choice-hint">신탁 및 위탁개발 선택으로 사업주체가 신탁사로 고정됨</p>
         )}
         <p className="choice-hint">
-          여기서 고른 값에 따라 STEP 3 현금흐름이 갈라집니다 — 리츠는 배당가능이익 90% 배당 요건과 배당 소득공제 법인세, 신탁은 신탁보수와 수익권 배분 구조가 반영됩니다.
+          선택값에 따라 STEP 3 현금흐름 산정 방식 상이. 리츠는 배당가능이익 90% 배당 요건 및 배당 소득공제 법인세, 신탁은 신탁보수 및 수익권 배분 구조 반영
         </p>
       </div>
 
       {/* ── 토지사용료 요율 (2026-11-17) ── */}
       <div className="choice-block">
         <div className="choice-head">
-          <strong>토지사용료 요율</strong>
+          <strong>토지사용료율</strong>
           <em className="choice-default">공시지가 대비, 기본값 3%</em>
         </div>
-        <p className="choice-hint">연 토지사용료 = 개별공시지가 × 대지면적 × 요율. 사업성 판정의 현금흐름에서 매년 차감됩니다.</p>
+        <p className="choice-hint">연 토지사용료 = 개별공시지가 × 대지면적 × 요율. 사업성 판정 현금흐름에서 매년 차감</p>
         <div className="choice-grid three">
           {LAND_FEE_RATES.map((option) => (
             <button
@@ -244,7 +244,7 @@ export default function StructureChoice() {
       {/* ── 공공기여 비율 ── */}
       <div className="choice-block">
         <div className="choice-head">
-          <strong>공공기여 비율</strong>
+          <strong>공공기여율</strong>
           <em className="choice-default">기본값 10%</em>
         </div>
         <input

@@ -158,7 +158,7 @@ export default function SiteProgram() {
           `/api/regulation?lon=${encodeURIComponent(center.lon)}&lat=${encodeURIComponent(center.lat)}&pnu=${encodeURIComponent(pnus[0])}`
         );
         const data = await response.json();
-        if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회에 실패했습니다.");
+        if (!response.ok || !data.ok) throw new Error(data?.message ?? "규제정보 조회 실패");
         const loadedRegulation = data.regulation as RegulationData;
         if (!cancelled) setRegulation(loadedRegulation);
         // STEP 3 보고서가 읽는 스냅샷에 용도지역·법정상한을 채워 넣는다.
@@ -182,7 +182,7 @@ export default function SiteProgram() {
           // 스토리지를 못 쓰면 STEP 3에서 값을 직접 입력하게 된다.
         }
       } catch (error) {
-        if (!cancelled) setRegulationError(error instanceof Error ? error.message : "규제정보 조회에 실패했습니다.");
+        if (!cancelled) setRegulationError(error instanceof Error ? error.message : "규제정보 조회 실패");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -243,7 +243,7 @@ export default function SiteProgram() {
           `/api/allowed-use?pnu=${encodeURIComponent(pnus[0])}&zoneName=${encodeURIComponent(effectiveZoneName)}&scenarioCode=BASE&siteAreaSqm=${encodeURIComponent(siteAreaSqm)}${gfaParam}`
         );
         const data = await response.json();
-        if (!response.ok || !data.ok) throw new Error(data?.message ?? "건축 가능시설 조회에 실패했습니다.");
+        if (!response.ok || !data.ok) throw new Error(data?.message ?? "건축 가능 용도 조회 실패");
         if (!cancelled) {
           setAllowedUseError("");
           setAllowedUse({
@@ -285,7 +285,7 @@ export default function SiteProgram() {
           new CustomEvent("inrealtylab:allowedUse", { detail: { keys: allowedKeys, limits: useLimits } })
         );
       } catch (error) {
-        if (!cancelled) setAllowedUseError(error instanceof Error ? error.message : "건축 가능시설 조회에 실패했습니다.");
+        if (!cancelled) setAllowedUseError(error instanceof Error ? error.message : "건축 가능 용도 조회 실패");
       }
     })();
 
@@ -399,9 +399,9 @@ export default function SiteProgram() {
   if (!snapshot) {
     return (
       <section className="control-section">
-        <div className="control-section-title"><span>STEP 2 자동 조회</span><strong>필지가 정해주는 값</strong></div>
+        <div className="control-section-title"><span>STEP 2-1 필지 조회값</span><strong>법규 조건 및 개발 규모</strong></div>
         <div className="regime-note">
-          현황분석에서 필지를 선택하면 용도지역, 건폐율, 용적률과 지을 수 있는 용도를 여기에서 자동으로 조회합니다.
+          현황분석에서 필지 선택 시 용도지역, 건폐율, 용적률 및 건축 가능 용도 자동 조회
         </div>
       </section>
     );
@@ -410,9 +410,9 @@ export default function SiteProgram() {
   if (!snapshot.center) {
     return (
       <section className="control-section">
-        <div className="control-section-title"><span>STEP 2 자동 조회</span><strong>필지가 정해주는 값</strong></div>
+        <div className="control-section-title"><span>STEP 2-1 필지 조회값</span><strong>법규 조건 및 개발 규모</strong></div>
         <div className="control-warning">
-          선택 필지의 위치 정보가 없어 규제정보를 조회하지 못했습니다. 현황분석 화면에서 필지를 다시 선택해 주세요.
+          선택 필지 위치정보 없음. 현황분석 화면에서 필지 재선택 필요
         </div>
       </section>
     );
@@ -432,11 +432,11 @@ export default function SiteProgram() {
     <section className="control-section s2">
       <div className="s2-head">
         <div className="control-section-title" style={{ marginBottom: 0 }}>
-          <span>STEP 2 자동 조회</span>
-          <strong>필지가 정해주는 값</strong>
+          <span>STEP 2-1 필지 조회값</span>
+          <strong>법규 조건 및 개발 규모</strong>
         </div>
         <div className={`s2-zone${zoneOverride ? " active" : ""}`}>
-          <label htmlFor="zone-override-select">용도지역 가정 (종상향 검토 시 변경)</label>
+          <label htmlFor="zone-override-select">용도지역 시나리오 (종상향 검토 시 변경)</label>
           <div className="s2-zone-row">
             <select
               id="zone-override-select"
@@ -457,12 +457,12 @@ export default function SiteProgram() {
 
       {zoneOverride && (
         <div className="s2-override-note">
-          <strong>가정 적용 중</strong> 실제 용도지역은 {regulation?.primaryZone ?? "확인 필요"}. 아래 값과 STEP 3 사업성은 전부{" "}
+          <strong>시나리오 적용 중</strong> 실제 용도지역은 {regulation?.primaryZone ?? "확인 필요"}. 아래 값과 STEP 3 사업성은 전부{" "}
           {zoneOverride} 가정 기준이며 법적으로 확정된 값이 아님
         </div>
       )}
 
-      {loading && <div className="regime-note">공공데이터를 조회하고 있습니다...</div>}
+      {loading && <div className="regime-note">공공데이터 조회 중</div>}
       {regulationError && <div className="control-error">{regulationError}</div>}
 
       {/* ── 핵심 수치 ── */}
@@ -506,7 +506,7 @@ export default function SiteProgram() {
       {regulation && (
         <div className="s2-block">
           <div className="s2-block-head">
-            <strong>규제 중첩</strong>
+            <strong>규제 중첩 현황</strong>
             <span>{effectiveLimit ? `${effectiveLimit.legalBasis.replace(/\s*[·ㆍ]\s*/g, ", ")}, 시행기준 ${regulation.statutoryLimit?.effectiveDate ?? "-"}` : ""}</span>
           </div>
           <div className="s2-chips">
@@ -527,7 +527,7 @@ export default function SiteProgram() {
       {/* ── 지을 수 있는 용도 ── */}
       <div className="s2-block">
         <div className="s2-block-head">
-          <strong>지을 수 있는 용도</strong>
+          <strong>건축 가능 용도</strong>
           {allowedUse && (
             <span>
               {allowedUse.facilities.length}개 용도 중 {allowedUse.diagnostics.matchedFacilityCount}개 건축 가능, 기준일 {allowedUse.source.baseDate}
@@ -614,7 +614,7 @@ export default function SiteProgram() {
         <div className="s2-split">
           <div className="s2-block s2-capacity">
             <div className="s2-block-head">
-              <strong>개발가능 규모</strong>
+              <strong>개발 가능 규모</strong>
               <span>보수, 기준안은 사업검토 가정이며 법적 기준 아님</span>
             </div>
             <div className="s2-table-wrap">
@@ -647,7 +647,7 @@ export default function SiteProgram() {
           </div>
 
           <div className="s2-block s2-status">
-            <div className="s2-block-head"><strong>규제 반영 상태</strong></div>
+            <div className="s2-block-head"><strong>규제 반영 현황</strong></div>
             <CapacityStatus label="대지면적" status="반영" tone="ok" detail="VWorld 지적 필지" />
             <CapacityStatus
               label="용도지역"
@@ -691,7 +691,7 @@ export default function SiteProgram() {
           </div>
         </div>
       ) : !loading && (
-        <div className="regime-note">세부 용도지역과 건폐율, 용적률 기준이 확인되어야 규모를 계산할 수 있습니다.</div>
+        <div className="regime-note">세부 용도지역 및 건폐율, 용적률 확인 후 규모 산정</div>
       )}
     </section>
   );

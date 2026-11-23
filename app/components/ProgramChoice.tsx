@@ -506,11 +506,11 @@ export default function ProgramChoice() {
             setDemandNotes((current) => ({ ...current, [item.code]: "" }));
           } else {
             setDemands((current) => ({ ...current, [item.code]: null }));
-            setDemandNotes((current) => ({ ...current, [item.code]: data?.message ?? `${item.title}를 불러오지 못했습니다.` }));
+            setDemandNotes((current) => ({ ...current, [item.code]: data?.message ?? `${item.title} 조회 실패` }));
           }
         })
         .catch(() => {
-          if (!cancelled) setDemandNotes((current) => ({ ...current, [item.code]: `${item.title}를 불러오지 못했습니다.` }));
+          if (!cancelled) setDemandNotes((current) => ({ ...current, [item.code]: `${item.title} 조회 실패` }));
         });
     }
     return () => {
@@ -772,8 +772,8 @@ export default function ProgramChoice() {
   if (!allowedKeys) {
     return (
       <section className="control-section">
-        <div className="control-section-title"><span>STEP 2 · 선택</span><strong>프로그램 구성</strong></div>
-        <div className="regime-note">지을 수 있는 용도가 확인되면 시설 구성을 제안합니다.</div>
+        <div className="control-section-title"><span>STEP 2-4 사용자 설정값</span><strong>시설 프로그램 구성</strong></div>
+        <div className="regime-note">건축 가능 용도 확인 후 시설 구성 제안</div>
       </section>
     );
   }
@@ -793,8 +793,8 @@ export default function ProgramChoice() {
   return (
     <section className="control-section">
       <div className="control-section-title">
-        <span>STEP 2 · 선택</span>
-        <strong>프로그램 구성</strong>
+        <span>STEP 2-4 사용자 설정값</span>
+        <strong>시설 프로그램 구성</strong>
       </div>
 
       <div className="choice-head" style={{ marginBottom: 10 }}>
@@ -803,9 +803,9 @@ export default function ProgramChoice() {
       </div>
       <p className="choice-hint">
         {selection.basis === "DEMAND_THEME"
-          ? `수요 기반 프로그램 도출 결과(추천 테마 ${facilityProgram?.selected_theme?.name ?? "-"})로 구성을 먼저 제안했습니다. 수익시설 연면적 중 시설별 수요(중간)로 뒷받침되는 면적은 ${selection.demandCoveredPct ?? "-"}%입니다.`
-          : "허용 시설 우선순위로 구성을 먼저 제안했습니다."}{" "}
-        각 줄을 바꾸면 손대지 않은 줄이 자동으로 조정돼 합계 100%가 유지됩니다.
+          ? `수요 기반 시설 도출 결과(추천 테마 ${facilityProgram?.selected_theme?.name ?? "-"}) 기준 1차 구성 제안. 수익시설 연면적 중 시설별 수요(중간) 충족 비율 ${selection.demandCoveredPct ?? "-"}%.`
+          : "허용 시설 우선순위 기준 1차 구성 제안."}{" "}
+        항목별 비율 변경 시 나머지 항목 자동 조정으로 합계 100% 유지
       </p>
 
       {/* ── 시나리오 ── */}
@@ -833,17 +833,17 @@ export default function ProgramChoice() {
           <div className="program-split">
             <div className="program-split-bar">
               <div className="program-split-public" style={{ width: `${scenario.publicPct}%` }}>
-                공공 {scenario.publicPct}% · {formatArea(publicGfa)}
+                공공 {scenario.publicPct}%, {formatArea(publicGfa)}
               </div>
               <div className="program-split-commercial" style={{ width: `${scenario.commercialPct}%` }}>
-                수익 {scenario.commercialPct}% · {formatArea(commercialGfa)}
+                수익 {scenario.commercialPct}%, {formatArea(commercialGfa)}
               </div>
             </div>
             <div className="program-split-total">지상 연면적 <strong>{formatArea(aboveGroundGfa)}</strong></div>
           </div>
         </>
       ) : (
-        <div className="regime-note">용적률 상한이 확인되면 연면적 배분을 계산합니다.</div>
+        <div className="regime-note">용적률 상한 확인 후 연면적 배분 산정</div>
       )}
 
       {/* ── 적정수요: 주거(2026-11-16), 실버(2026-11-17) ── */}
@@ -903,7 +903,7 @@ export default function ProgramChoice() {
                 </div>
               </>
             ) : (
-              <div className="regime-note">{demandNotes[item.code] || `${item.title}를 계산하고 있습니다.`}</div>
+              <div className="regime-note">{demandNotes[item.code] || `${item.title} 산정 중`}</div>
             )}
           </div>
         );
@@ -952,21 +952,21 @@ export default function ProgramChoice() {
                 <p className="program-row-note">
                   {facility.label} 연면적은 비율이 아니라{" "}
                   {DEMAND_FACILITIES.find((d) => d.code === code)?.title}({DEMAND_SCENARIO_LABEL[scenarioOf(code)]}) 기준{" "}
-                  {formatArea(activePlans[code]!.gfa)}, 계획 {formatCount(activePlans[code]!.units)}세대로 사업성 계산에 반영됩니다.
+                  {formatArea(activePlans[code]!.gfa)}, 계획 {formatCount(activePlans[code]!.units)}세대로 사업성 산정에 반영
                 </p>
               )}
               {capSqm !== null && ceilingPct < 100 && (
                 <p className="program-row-note">
-                  조례상 이 용도의 바닥면적 합계는 {formatArea(capSqm)} 미만입니다. 수익시설 {formatArea(commercialGfa)} 기준으로
-                  최대 {ceilingPct}%까지만 배분됩니다.
+                  조례상 해당 용도 바닥면적 합계 {formatArea(capSqm)} 미만. 수익시설 {formatArea(commercialGfa)} 기준
+                  최대 {ceilingPct}%까지 배분 가능
                 </p>
               )}
               {capSqm === null && partialCaps.length > 0 && (
                 <p className="program-row-note">
                   {partialCaps
                     .map((item) => `${USE_LABEL[item.key] ?? item.key}로 구성하면 ${formatArea(item.cap)} 미만`)
-                    .join(" · ")}
-                  . 상한이 없는 용도로 구성하면 제한이 없습니다.
+                    .join(", ")}
+                  . 상한 없는 용도로 구성 시 면적 제한 없음
                 </p>
               )}
             </div>
@@ -976,9 +976,9 @@ export default function ProgramChoice() {
 
       {!totalOk && (
         <div className="control-warning">
-          수익시설 비율 합계가 정확히 100%가 되어야 연면적 배분이 확정됩니다. 지금은 {commercialTotal}%입니다.
+          수익시설 비율 합계 100% 충족 시 연면적 배분 확정. 현재 {commercialTotal}%
           {capacityShortfall && (
-            <> 이 필지는 허용 용도별 바닥면적 상한을 다 합쳐도 수익시설 연면적을 채우지 못합니다. 규모를 줄이거나 공공시설 비중을 높이는 시나리오를 검토해야 합니다.</>
+            <> 허용 용도별 바닥면적 상한 합계가 수익시설 연면적에 미달. 규모 축소 또는 공공시설 비중 확대 시나리오 검토 필요</>
           )}
         </div>
       )}
@@ -1012,7 +1012,7 @@ export default function ProgramChoice() {
       {/* ── 공공시설 ── */}
       <div className="program-head" style={{ marginTop: 24 }}>
         <div><strong>공공시설</strong> <span>{aboveGroundGfa > 0 ? formatArea(publicGfa) : "-"}</span></div>
-        <em className="program-note">수익 발생 여부로 나뉩니다</em>
+        <em className="program-note">수익 발생 여부로 구분</em>
       </div>
       <div className="program-chips">
         {PUBLIC_FACILITIES.map((facility) => {
