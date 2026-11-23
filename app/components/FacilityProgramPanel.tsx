@@ -148,8 +148,9 @@ export default function FacilityProgramPanel() {
 
   useEffect(() => {
     load();
-    // 용도지역, 상한이 확정되면 SiteProgram이 allowedUse 이벤트를 보낸다. 스냅샷 저장이 뒤따르므로 한 박자 늦게 읽는다.
-    const onAllowed = () => window.setTimeout(load, 300);
+    // 용도지역, 상한이 확정되면 SiteProgram이 스냅샷을 먼저 저장한 뒤 allowedUse 이벤트를 보낸다(2026-11-23).
+    // 그래서 지연 없이 바로 읽어도 새 용적률이 들어 있다.
+    const onAllowed = () => load();
     window.addEventListener("inrealtylab:allowedUse", onAllowed);
     return () => window.removeEventListener("inrealtylab:allowedUse", onAllowed);
   }, [load]);

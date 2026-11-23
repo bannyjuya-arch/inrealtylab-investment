@@ -9,7 +9,7 @@
 // STEP 1(SiteAnalyzer)이 sessionStorage["inrealtylab.step1"]에 남긴
 // { pnus, siteAreaSqm, center }를 읽어 동작한다.
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { ZONE_OVERRIDE_OPTIONS, findNationalZoneLimit } from "@/lib/zone-limits";
 
 const STEP1_KEY = "inrealtylab.step1";
@@ -73,6 +73,8 @@ type AllowedUseData = {
     hasLocalLayer?: boolean;
   };
   source: { code: string; name: string; endpoints: string[]; baseDate: string; queriedAt: string; note: string };
+  /** 이 결과가 어느 용도지역으로 조회한 것인지. 시나리오 전환 중 이전 결과와 섞이지 않게 한다. */
+  forZone?: string;
 };
 
 type OrdinanceLimit = {
@@ -252,38 +254,12 @@ export default function SiteProgram() {
             zone: data.zone,
             diagnostics: data.diagnostics,
             source: data.source,
+            forZone: effectiveZoneName,
           });
           setOrdinanceLimit((data.ordinanceLimit as OrdinanceLimit | null) ?? null);
         }
-        // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설과 면적 상한을 걸러낼 때 쓴다.
-        const facilities: AllowedUseFacility[] = data.facilities ?? [];
-        const allowedKeys = facilities
-          .filter(
-            (facility) =>
-              facility.decision === "ALLOWED" ||
-              facility.decision === "CONDITIONAL" ||
-              facility.decision === "REVIEW"
-          )
-          .map((facility) => facility.key);
-        // 조례가 정한 용도별 바닥면적 상한. 이게 없으면 제2종일반주거에
-        // 오피스 3,700㎡ 같은 애초에 불가능한 규모를 제안하게 된다.
-        const useLimits: Record<string, { decision: AllowedUseDecision; maxGfaSqm: number | null }> = {};
-        for (const facility of facilities) {
-          useLimits[facility.key] = {
-            decision: facility.decision,
-            maxGfaSqm: facility.maxGfaSqm ?? null,
-          };
-        }
-        try {
-          sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
-          sessionStorage.setItem("inrealtylab.step2UseLimits", JSON.stringify(useLimits));
-        } catch {
-          // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
-        }
-        // 허용용도 조회는 비동기라 ProgramChoice가 먼저 뜬다. 끝났다고 알려준다.
-        window.dispatchEvent(
-          new CustomEvent("inrealtylab:allowedUse", { detail: { keys: allowedKeys, limits: useLimits } })
-        );
+        // 2026-11-23: 하위 단계(STEP 2-3, 2-4)에 알리는 일은 아래 "스냅샷 저장 + 알림" effect로 옮겼다.
+        // 여기서 바로 알리면 새 용도지역의 용적률이 스냅샷에 저장되기 전이라 이전 값이 전달됐다.
       } catch (error) {
         if (!cancelled) setAllowedUseError(error instanceof Error ? error.message : "건축 가능 용도 조회 실패");
       }
@@ -323,11 +299,18 @@ export default function SiteProgram() {
     };
   }, [nationalLimitForEffectiveZone, ordinanceLimit]);
 
-  // 조례 상한이 국가 상한보다 낮으면, 혹은 용도지역 가정 시나리오가 켜져 있으면
-  // STEP 3이 읽는 스냅샷도 그 값으로 덮어쓴다. 가정 시나리오일 때는 실제 조회값을
-  // actualPrimaryZone에 같이 남겨 STEP 3 보고서가 착각하지 않고 경고를 띄울 수 있게 한다.
+  // 스냅샷 저장 + 하위 단계 알림 (2026-11-23 수정)
+  // 순서가 중요하다: 현재 용도지역의 허용용도와 조례 상한이 모두 도착한 뒤에만
+  //   ① STEP 3와 하위 단계가 읽는 스냅샷(용도지역, 건폐율, 용적률)을 저장하고
+  //   ② 그 다음에 inrealtylab:allowedUse 이벤트를 보낸다.
+  // 예전에는 조회 직후 이벤트를 먼저 보내고 스냅샷은 다음 렌더에서 저장해서, 용도지역을 바꿔도
+  // 시설 구성(ProgramChoice)과 수요 산출(FacilityProgramPanel)이 이전 용적률을 읽었다.
+  // 전환 중의 중간 상태(새 용도지역 + 이전 조례 상한)도 저장하지 않는다.
+  const lastNotifiedKey = useRef("");
   useEffect(() => {
-    if (!effectiveLimit || !snapshot) return;
+    if (!effectiveLimit || !snapshot || !effectiveZoneName) return;
+    const loadedForZone = allowedUse?.forZone === effectiveZoneName;
+    if (!loadedForZone && !allowedUseError) return;
     try {
       const previous = sessionStorage.getItem("inrealtylab.part1Snapshot");
       sessionStorage.setItem(
@@ -345,7 +328,35 @@ export default function SiteProgram() {
     } catch {
       // 스토리지를 못 쓰면 STEP 3에서 값을 직접 입력하게 된다.
     }
-  }, [effectiveLimit, snapshot, effectiveZoneName, zoneOverride, regulation]);
+    if (!loadedForZone || !allowedUse) return;
+
+    const aboveGroundGfaSqm = snapshot.siteAreaSqm * (effectiveLimit.farMax / 100);
+    const notifyKey = `${effectiveZoneName}|${effectiveLimit.farMax}|${Math.round(aboveGroundGfaSqm)}`;
+    if (notifyKey === lastNotifiedKey.current) return;
+    lastNotifiedKey.current = notifyKey;
+
+    // 프로그램 구성(ProgramChoice)이 고를 수 있는 시설과 면적 상한을 걸러낼 때 쓴다.
+    const allowedKeys = allowedUse.facilities
+      .filter((facility) => facility.decision !== "PROHIBITED")
+      .map((facility) => facility.key);
+    // 조례가 정한 용도별 바닥면적 상한. 이게 없으면 제2종일반주거에
+    // 오피스 3,700㎡ 같은 애초에 불가능한 규모를 제안하게 된다.
+    const useLimits: Record<string, { decision: AllowedUseDecision; maxGfaSqm: number | null }> = {};
+    for (const facility of allowedUse.facilities) {
+      useLimits[facility.key] = { decision: facility.decision, maxGfaSqm: facility.maxGfaSqm ?? null };
+    }
+    try {
+      sessionStorage.setItem("inrealtylab.step2AllowedUse", JSON.stringify(allowedKeys));
+      sessionStorage.setItem("inrealtylab.step2UseLimits", JSON.stringify(useLimits));
+    } catch {
+      // 스토리지를 못 쓰면 프로그램 구성에서 안내가 뜬다.
+    }
+    window.dispatchEvent(
+      new CustomEvent("inrealtylab:allowedUse", {
+        detail: { keys: allowedKeys, limits: useLimits, zoneName: effectiveZoneName, aboveGroundGfaSqm },
+      })
+    );
+  }, [effectiveLimit, snapshot, effectiveZoneName, zoneOverride, regulation, allowedUse, allowedUseError]);
 
   const statutoryCapacity = useMemo(() => {
     if (!effectiveLimit || totalArea <= 0) return null;

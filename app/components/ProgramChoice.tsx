@@ -9,7 +9,7 @@
 // SiteProgram이 sessionStorage["inrealtylab.step2AllowedUse"]에 남긴
 // 허용 facility_key 목록으로 고를 수 있는 시설을 걸러낸다.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FACILITY_PROGRAM_EVENT, FACILITY_PROGRAM_KEY, type FacilityProgramResult } from "./FacilityProgramPanel";
 
 const ALLOWED_KEY = "inrealtylab.step2AllowedUse";
@@ -362,6 +362,9 @@ export default function ProgramChoice() {
   const [demands, setDemands] = useState<Partial<Record<CommercialCode, HousingDemand | null>>>({});
   const [demandNotes, setDemandNotes] = useState<Partial<Record<CommercialCode, string>>>({});
   const [facilityProgram, setFacilityProgram] = useState<StoredFacilityProgram | null>(null);
+  // 2026-11-23: STEP 2-1에서 용도지역(시나리오)이나 용적률이 바뀐 것을 알아채기 위한 키.
+  const [zoneKey, setZoneKey] = useState("");
+  const previousZoneKey = useRef("");
 
   // 2026-11-19: 수요 기반 프로그램 도출 결과(FacilityProgramPanel)를 받는다.
   useEffect(() => {
@@ -387,6 +390,12 @@ export default function ProgramChoice() {
       } else if (detail && typeof detail === "object") {
         if (Array.isArray(detail.keys)) setAllowedKeys(detail.keys as string[]);
         if (detail.limits) setUseLimits(detail.limits as UseLimits);
+        const gfa = Number(detail.aboveGroundGfaSqm);
+        if (Number.isFinite(gfa) && gfa > 0) {
+          setAboveGroundGfa(gfa);
+          setZoneKey(`${detail.zoneName ?? ""}|${Math.round(gfa)}`);
+          return;
+        }
       }
       setAboveGroundGfa(readAboveGroundGfa());
     }
@@ -473,6 +482,36 @@ export default function ProgramChoice() {
     setSelection(buildRecommended(RECOMMENDED_SCENARIO));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowedKeys, available, maxPctOf, selection]);
+
+  // 2026-11-23: 용도지역(시나리오)이나 용적률이 바뀌면 시설 구성을 새 조건에 맞춘다.
+  // 예전에는 최초 제안이 끝나면 다시 만들지 않아서, 제2종을 제3종으로 바꿔도 시설 구성이 그대로였다.
+  //  - 사용자가 손대지 않은 구성: 새 허용용도, 면적 상한, 연면적 기준으로 1차 제안을 다시 만든다.
+  //    (수요 산출 결과가 뒤이어 도착하면 아래 effect가 수요 기반으로 한 번 더 갱신한다)
+  //  - 사용자가 손댄 구성: 그대로 두되, 새 용도지역에서 불가한 시설은 빼고 면적 상한을 넘는 비율은 깎는다.
+  useEffect(() => {
+    if (!zoneKey) return;
+    const previous = previousZoneKey.current;
+    previousZoneKey.current = zoneKey;
+    if (!previous || previous === zoneKey || !selection || !allowedKeys) return;
+    if (selection.touched.length === 0) {
+      const next = buildRecommended(selection.scenarioCode);
+      setSelection({ ...selection, ...next, demandScenario: selection.demandScenario, demandScenarios: selection.demandScenarios });
+      return;
+    }
+    const allowedCodes = new Set(available.map((facility) => facility.code));
+    const commercial: Partial<Record<CommercialCode, number>> = {};
+    for (const [code, pct] of Object.entries(selection.commercial) as Array<[CommercialCode, number]>) {
+      const facility = available.find((item) => item.code === code);
+      if (!facility || !allowedCodes.has(code)) continue;
+      commercial[code] = Math.min(pct, maxPctOf(facility));
+    }
+    setSelection({
+      ...selection,
+      commercial,
+      touched: selection.touched.filter((code) => code in commercial),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoneKey]);
 
   // 수요 결과가 나중에 도착하거나 입력(용도지역, 연면적)이 바뀌면, 사용자가 아직 손대지 않은 제안만 수요 기반으로 다시 만든다.
   useEffect(() => {
